@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["libxcrypt", "gh"]
+packages = ["libxcrypt", "gh", "mailutils", "nano", "lsof"]
 
 [workflows]
 runButton = "Project"
@@ -45,6 +45,14 @@ waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[ports]]
+localPort = 3000
+externalPort = 3000
+
+[[ports]]
+localPort = 3001
+externalPort = 3001
 
 [[ports]]
 localPort = 5000

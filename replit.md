@@ -39,6 +39,10 @@ infra/
 - **Risks** - Risk assessment with likelihood/impact scores
 - **Integrations** - Third-party integration management
 
+## Features
+- Dark/Light mode toggle (persists to localStorage)
+
 ## Recent Changes
 - 2026-01-18: Initial Replit environment setup
 - 2026-01-18: Added Next.js + Tailwind frontend with all pages
+- 2026-01-18: Added dark/light mode toggle feature

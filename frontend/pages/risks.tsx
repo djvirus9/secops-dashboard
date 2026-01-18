@@ -28,17 +28,17 @@ export default function Risks() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Risks</h1>
-      {err && <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">❌ {err}</div>}
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Risks</h1>
+      {err && <div className="rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-gray-900 dark:text-white">❌ {err}</div>}
       {!data ? (
-        <div className="text-sm text-gray-600">Loading...</div>
+        <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
       ) : (
         <div className="grid gap-4">
           {data.results.map((r) => (
-            <div key={r.asset} className="rounded-xl border bg-white p-5 shadow-sm">
+            <div key={r.asset} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
               <div className="flex items-center justify-between">
-                <div className="font-mono text-sm">{r.asset}</div>
-                <span className="rounded-full border px-2 py-1 text-xs">max {r.max_risk}</span>
+                <div className="font-mono text-sm text-gray-900 dark:text-white">{r.asset}</div>
+                <span className="rounded-full border dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-300">max {r.max_risk}</span>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                 <Metric label="Findings" value={r.total_findings} />
@@ -49,16 +49,16 @@ export default function Risks() {
           ))}
         </div>
       )}
-      <p className="text-xs text-gray-500">Sorted by max risk, then count.</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">Sorted by max risk, then count.</p>
     </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border p-3">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
+    <div className="rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-gray-700 p-3">
+      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{value}</div>
     </div>
   );
 }

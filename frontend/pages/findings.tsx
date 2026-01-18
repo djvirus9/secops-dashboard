@@ -1,74 +1,67 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "../lib/api";
 
 type Finding = {
   id: string;
+  fingerprint: string;
   tool: string;
   title: string;
   severity: string;
   asset: string;
   status: string;
   risk_score: number;
+  occurrences: number;
   last_seen: string;
 };
 
-export default function Findings() {
+export default function FindingsPage() {
   const [data, setData] = useState<{ count: number; results: Finding[] } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string>("");
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        setErr(null);
-        const r = await fetch("/api/findings", { cache: "no-store" } as any);
-        const j = await r.json();
-        if (!r.ok) throw new Error(j?.detail || `HTTP ${r.status}`);
-        setData(j);
-      } catch (e: any) {
-        setErr(e?.message || "Failed to load findings");
-      }
-    };
-    run();
+    apiGet<{ count: number; results: Finding[] }>("/findings")
+      .then(setData)
+      .catch((e) => setErr(String(e?.message || e)));
   }, []);
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Findings</h1>
-      {err && <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">❌ {err}</div>}
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Findings</h1>
+
+      {err && <div className="mb-4 p-3 rounded bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-gray-900 dark:text-white">Error: {err}</div>}
+
       {!data ? (
-        <div className="text-sm text-gray-600">Loading...</div>
+        <div className="text-gray-600 dark:text-gray-300">Loading...</div>
       ) : (
-        <div className="rounded-xl border bg-white shadow-sm overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50">
+        <div className="overflow-x-auto rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
               <tr>
-                <th className="p-3 text-left">Severity</th>
-                <th className="p-3 text-left">Risk</th>
-                <th className="p-3 text-left">Title</th>
-                <th className="p-3 text-left">Asset</th>
-                <th className="p-3 text-left">Tool</th>
-                <th className="p-3 text-left">Status</th>
-                <th className="p-3 text-left">Last Seen</th>
+                <th className="text-left p-3">Risk</th>
+                <th className="text-left p-3">Severity</th>
+                <th className="text-left p-3">Tool</th>
+                <th className="text-left p-3">Title</th>
+                <th className="text-left p-3">Asset</th>
+                <th className="text-left p-3">Occur</th>
+                <th className="text-left p-3">Last seen</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="text-gray-900 dark:text-gray-100">
               {data.results.map((f) => (
-                <tr key={f.id} className="border-b last:border-b-0">
-                  <td className="p-3">
-                    <span className="rounded-full border px-2 py-1 text-xs">{f.severity.toUpperCase()}</span>
-                  </td>
-                  <td className="p-3 font-mono">{f.risk_score}</td>
-                  <td className="p-3">{f.title}</td>
-                  <td className="p-3 font-mono">{f.asset}</td>
+                <tr key={f.id} className="border-t border-gray-200 dark:border-gray-700">
+                  <td className="p-3 font-semibold">{f.risk_score}</td>
+                  <td className="p-3">{f.severity}</td>
                   <td className="p-3">{f.tool}</td>
-                  <td className="p-3">{f.status}</td>
-                  <td className="p-3 font-mono">{f.last_seen}</td>
+                  <td className="p-3">{f.title}</td>
+                  <td className="p-3">{f.asset}</td>
+                  <td className="p-3">{f.occurrences}</td>
+                  <td className="p-3 text-gray-500 dark:text-gray-400">{f.last_seen}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      <p className="text-xs text-gray-500">Tip: Go to Dashboard and submit a test signal, then refresh.</p>
     </div>
   );
 }

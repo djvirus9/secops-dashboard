@@ -69,29 +69,29 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-gray-600">API health + ingest test + live wiring (MVP).</p>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
+        <p className="text-sm text-gray-600 dark:text-gray-400">API health + ingest test + live wiring (MVP).</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="API Status">
           {health ? (
             <div className="space-y-2">
-              <div className="inline-flex rounded-full border px-2 py-1 text-sm">✅ {health.status}</div>
-              <div className="text-xs text-gray-500">via Next rewrites: /api → http://localhost:8000</div>
+              <div className="inline-flex rounded-full border dark:border-gray-600 px-2 py-1 text-sm text-gray-900 dark:text-white">✅ {health.status}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">via Next rewrites: /api → http://localhost:8000</div>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">
+              <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800 p-3 text-sm text-gray-900 dark:text-white">
                 ❌ Not reachable<br />
-                <span className="text-xs text-gray-600">{healthErr || "Start backend on port 8000"}</span>
+                <span className="text-xs text-gray-600 dark:text-gray-400">{healthErr || "Start backend on port 8000"}</span>
               </div>
             </div>
           )}
         </Card>
 
         <Card title="Endpoints">
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-1 text-sm text-gray-900 dark:text-gray-100">
             <li className="font-mono">{API.health}</li>
             <li className="font-mono">{API.ingest}</li>
             <li className="font-mono">{API.findings}</li>
@@ -99,8 +99,8 @@ export default function Dashboard() {
           </ul>
         </Card>
 
-        <Card title="What’s next">
-          <ol className="list-decimal pl-5 text-sm text-gray-600 space-y-1">
+        <Card title="What's next">
+          <ol className="list-decimal pl-5 text-sm text-gray-600 dark:text-gray-400 space-y-1">
             <li>Persist to Postgres</li>
             <li>Asset inventory + ownership</li>
             <li>Correlation + dedupe</li>
@@ -113,12 +113,12 @@ export default function Dashboard() {
         <Card title="Send Test Signal">
           <div className="grid gap-3">
             <Field label="Tool">
-              <input className="w-full rounded-md border px-3 py-2 text-sm" value={tool} onChange={(e) => setTool(e.target.value)} />
+              <input className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={tool} onChange={(e) => setTool(e.target.value)} />
             </Field>
 
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Severity">
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={severity} onChange={(e) => setSeverity(e.target.value)}>
                   <option value="info">info</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
@@ -127,7 +127,7 @@ export default function Dashboard() {
                 </select>
               </Field>
               <Field label="Exposure">
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={exposure} onChange={(e) => setExposure(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={exposure} onChange={(e) => setExposure(e.target.value)}>
                   <option value="internal">internal</option>
                   <option value="internet">internet</option>
                 </select>
@@ -136,34 +136,34 @@ export default function Dashboard() {
 
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Criticality">
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={criticality} onChange={(e) => setCriticality(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={criticality} onChange={(e) => setCriticality(e.target.value)}>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
                   <option value="high">high</option>
                 </select>
               </Field>
               <Field label="Asset">
-                <input className="w-full rounded-md border px-3 py-2 text-sm" value={asset} onChange={(e) => setAsset(e.target.value)} />
+                <input className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={asset} onChange={(e) => setAsset(e.target.value)} />
               </Field>
             </div>
 
             <Field label="Title">
-              <input className="w-full rounded-md border px-3 py-2 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
 
             <button
               onClick={submit}
               disabled={submitting}
-              className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-md bg-black dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-black disabled:opacity-60"
             >
               {submitting ? "Submitting..." : "Submit"}
             </button>
 
-            {submitErr && <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">❌ {submitErr}</div>}
+            {submitErr && <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800 p-3 text-sm text-gray-900 dark:text-white">❌ {submitErr}</div>}
             {submitRes && (
-              <div className="rounded-md border bg-white p-3">
-                <div className="text-sm font-medium">Response</div>
-                <pre className="mt-2 overflow-auto rounded-md bg-gray-50 p-3 text-xs">
+              <div className="rounded-md border dark:border-gray-600 bg-white dark:bg-gray-700 p-3">
+                <div className="text-sm font-medium text-gray-900 dark:text-white">Response</div>
+                <pre className="mt-2 overflow-auto rounded-md bg-gray-50 dark:bg-gray-800 p-3 text-xs text-gray-900 dark:text-gray-100">
 {JSON.stringify(submitRes, null, 2)}
                 </pre>
               </div>
@@ -172,10 +172,10 @@ export default function Dashboard() {
         </Card>
 
         <Card title="Payload Preview">
-          <pre className="overflow-auto rounded-md bg-gray-50 p-4 text-xs">
+          <pre className="overflow-auto rounded-md bg-gray-50 dark:bg-gray-800 p-4 text-xs text-gray-900 dark:text-gray-100">
 {JSON.stringify(payload, null, 2)}
           </pre>
-          <p className="mt-2 text-xs text-gray-500">This becomes normalized into Finding + Risk on the backend.</p>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">This becomes normalized into Finding + Risk on the backend.</p>
         </Card>
       </div>
     </div>
@@ -184,8 +184,8 @@ export default function Dashboard() {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border bg-white p-5 shadow-sm">
-      <div className="mb-3 text-sm font-semibold">{title}</div>
+    <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+      <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{title}</div>
       {children}
     </div>
   );
@@ -194,7 +194,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid gap-1">
-      <span className="text-xs font-medium text-gray-600">{label}</span>
+      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{label}</span>
       {children}
     </label>
   );
