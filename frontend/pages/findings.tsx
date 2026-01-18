@@ -1,55 +1,74 @@
+import { useEffect, useState } from "react";
+
+type Finding = {
+  id: string;
+  tool: string;
+  title: string;
+  severity: string;
+  asset: string;
+  status: string;
+  risk_score: number;
+  last_seen: string;
+};
+
 export default function Findings() {
-  const findings = [
-    { id: 1, title: 'Unauthorized Access Attempt', severity: 'high', status: 'open', date: '2026-01-18' },
-    { id: 2, title: 'Suspicious Network Traffic', severity: 'medium', status: 'investigating', date: '2026-01-17' },
-    { id: 3, title: 'Failed Login Attempts', severity: 'low', status: 'resolved', date: '2026-01-16' },
-    { id: 4, title: 'Malware Detection', severity: 'critical', status: 'open', date: '2026-01-18' },
-    { id: 5, title: 'Configuration Drift', severity: 'medium', status: 'open', date: '2026-01-15' },
-  ]
+  const [data, setData] = useState<{ count: number; results: Finding[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const severityColors: Record<string, string> = {
-    critical: 'bg-red-600',
-    high: 'bg-orange-500',
-    medium: 'bg-yellow-500',
-    low: 'bg-blue-500',
-  }
-
-  const statusColors: Record<string, string> = {
-    open: 'text-red-400',
-    investigating: 'text-yellow-400',
-    resolved: 'text-green-400',
-  }
+  useEffect(() => {
+    const run = async () => {
+      try {
+        setErr(null);
+        const r = await fetch("/api/findings", { cache: "no-store" } as any);
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.detail || `HTTP ${r.status}`);
+        setData(j);
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load findings");
+      }
+    };
+    run();
+  }, []);
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold mb-8">Findings</h1>
-
-      <div className="bg-gray-800 rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-700">
-            <tr>
-              <th className="text-left p-4">Title</th>
-              <th className="text-left p-4">Severity</th>
-              <th className="text-left p-4">Status</th>
-              <th className="text-left p-4">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {findings.map((finding) => (
-              <tr key={finding.id} className="border-t border-gray-700 hover:bg-gray-750">
-                <td className="p-4">{finding.title}</td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded text-xs text-white ${severityColors[finding.severity]}`}>
-                    {finding.severity}
-                  </span>
-                </td>
-                <td className={`p-4 ${statusColors[finding.status]}`}>{finding.status}</td>
-                <td className="p-4 text-gray-400">{finding.date}</td>
+    <div className="space-y-4">
+      <h1 className="text-2xl font-semibold">Findings</h1>
+      {err && <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm">❌ {err}</div>}
+      {!data ? (
+        <div className="text-sm text-gray-600">Loading...</div>
+      ) : (
+        <div className="rounded-xl border bg-white shadow-sm overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-gray-50">
+              <tr>
+                <th className="p-3 text-left">Severity</th>
+                <th className="p-3 text-left">Risk</th>
+                <th className="p-3 text-left">Title</th>
+                <th className="p-3 text-left">Asset</th>
+                <th className="p-3 text-left">Tool</th>
+                <th className="p-3 text-left">Status</th>
+                <th className="p-3 text-left">Last Seen</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {data.results.map((f) => (
+                <tr key={f.id} className="border-b last:border-b-0">
+                  <td className="p-3">
+                    <span className="rounded-full border px-2 py-1 text-xs">{f.severity.toUpperCase()}</span>
+                  </td>
+                  <td className="p-3 font-mono">{f.risk_score}</td>
+                  <td className="p-3">{f.title}</td>
+                  <td className="p-3 font-mono">{f.asset}</td>
+                  <td className="p-3">{f.tool}</td>
+                  <td className="p-3">{f.status}</td>
+                  <td className="p-3 font-mono">{f.last_seen}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-gray-500">Tip: Go to Dashboard and submit a test signal, then refresh.</p>
     </div>
-  )
+  );
 }
