@@ -14,8 +14,10 @@ from sqlalchemy import select, func
 from .db import engine, SessionLocal, Base
 from .models import Signal, Finding, Asset, Comment
 from .notifications import send_slack_notification, send_slack_notification_sync, create_jira_issue, create_jira_issue_sync
+from .parsers import list_parsers, parse_scan_results, get_parser
+from .parsers.base import ScannerCategory
 
-app = FastAPI(title="SecOps Dashboard API", version="0.6.0")
+app = FastAPI(title="SecOps Dashboard API", version="0.7.0")
 
 NOTIFY_SEVERITIES = {"critical", "high"}
 
@@ -621,3 +623,176 @@ async def test_slack():
         return {"ok": True, "message": "Test notification sent successfully"}
     else:
         raise HTTPException(status_code=500, detail=f"Failed to send: {result}")
+
+# -----------------------------
+# Scanner Parsers
+# -----------------------------
+@app.get("/parsers")
+def get_parsers(category: Optional[str] = None):
+    all_parsers = list_parsers()
+    
+    if category:
+        try:
+            cat = ScannerCategory(category.lower())
+            all_parsers = [p for p in all_parsers if p["category"] == cat.value]
+        except ValueError:
+            pass
+    
+    by_category = {}
+    for p in all_parsers:
+        cat = p["category"]
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(p)
+    
+    return {
+        "count": len(all_parsers),
+        "categories": list(by_category.keys()),
+        "parsers": all_parsers,
+        "by_category": by_category,
+    }
+
+# -----------------------------
+# Import scan results
+# -----------------------------
+class ScanImportRequest(BaseModel):
+    content: str = Field(..., description="Raw scan output content (JSON, XML, CSV, etc.)")
+    parser: Optional[str] = Field(None, description="Parser name (auto-detect if not specified)")
+    filename: Optional[str] = Field(None, description="Original filename to help with detection")
+    default_asset: Optional[str] = Field(None, description="Default asset if not detected from scan")
+    default_exposure: str = Field("internal", description="Default exposure level")
+    default_criticality: str = Field("medium", description="Default criticality level")
+
+@app.post("/import/scan")
+def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
+    try:
+        parsed_findings = parse_scan_results(
+            content=payload.content,
+            parser_name=payload.parser,
+            filename=payload.filename,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Failed to parse scan: {str(e)}")
+    
+    if not parsed_findings:
+        return {
+            "ok": True,
+            "imported": 0,
+            "new_findings": 0,
+            "deduplicated": 0,
+            "message": "No findings found in scan output",
+        }
+    
+    db: Session = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        imported = 0
+        new_findings = 0
+        deduplicated = 0
+        
+        for pf in parsed_findings:
+            asset_key = (pf.asset or payload.default_asset or "unknown").strip().lower()
+            
+            asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
+            if asset is None:
+                asset = Asset(
+                    key=asset_key,
+                    name=asset_key,
+                    environment="unknown",
+                    owner="",
+                    criticality=payload.default_criticality,
+                    exposure=payload.default_exposure,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(asset)
+                db.flush()
+            
+            signal = Signal(tool=pf.tool, payload=json.dumps(pf.to_signal_payload()))
+            db.add(signal)
+            db.flush()
+            
+            severity = pf.severity.value
+            exposure = asset.exposure or payload.default_exposure
+            criticality = asset.criticality or payload.default_criticality
+            risk_score = compute_risk_score(severity, exposure, criticality)
+            fp = make_fingerprint(pf.tool, pf.title, asset_key)
+            
+            existing = db.execute(select(Finding).where(Finding.fingerprint == fp)).scalars().first()
+            if existing:
+                existing.last_seen = now
+                existing.occurrences = (existing.occurrences or 1) + 1
+                existing.risk_score = max(existing.risk_score or 0, risk_score)
+                existing.signal_id = signal.id
+                db.add(existing)
+                deduplicated += 1
+                
+                if severity in NOTIFY_SEVERITIES:
+                    background_tasks.add_task(
+                        run_notifications_sync,
+                        title=pf.title,
+                        severity=severity,
+                        asset=asset_key,
+                        risk_score=existing.risk_score,
+                        finding_id=existing.id,
+                        tool=pf.tool,
+                        is_new=False,
+                        occurrences=existing.occurrences,
+                    )
+            else:
+                finding = Finding(
+                    fingerprint=fp,
+                    tool=pf.tool,
+                    title=pf.title,
+                    severity=severity,
+                    asset=asset_key,
+                    asset_id=asset.id,
+                    exposure=exposure,
+                    criticality=criticality,
+                    status="open",
+                    risk_score=risk_score,
+                    occurrences=1,
+                    first_seen=now,
+                    last_seen=now,
+                    signal_id=signal.id,
+                )
+                db.add(finding)
+                new_findings += 1
+                
+                if severity in NOTIFY_SEVERITIES:
+                    db.flush()
+                    background_tasks.add_task(
+                        run_notifications_sync,
+                        title=pf.title,
+                        severity=severity,
+                        asset=asset_key,
+                        risk_score=risk_score,
+                        finding_id=finding.id,
+                        tool=pf.tool,
+                        is_new=True,
+                        occurrences=1,
+                    )
+            
+            imported += 1
+        
+        db.commit()
+        
+        return {
+            "ok": True,
+            "imported": imported,
+            "new_findings": new_findings,
+            "deduplicated": deduplicated,
+            "message": f"Successfully imported {imported} findings ({new_findings} new, {deduplicated} deduplicated)",
+        }
+    finally:
+        db.close()
+
+@app.get("/parsers/{parser_name}")
+def get_parser_info(parser_name: str):
+    parser = get_parser(parser_name)
+    if not parser:
+        raise HTTPException(status_code=404, detail=f"Parser '{parser_name}' not found")
+    
+    return parser.get_info()
