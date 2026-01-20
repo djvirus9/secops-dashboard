@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiGet } from "../lib/api";
 
 type Finding = {
@@ -9,9 +10,25 @@ type Finding = {
   severity: string;
   asset: string;
   status: string;
+  assignee: string | null;
   risk_score: number;
   occurrences: number;
   last_seen: string;
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "bg-red-600 text-white",
+  high: "bg-orange-500 text-white",
+  medium: "bg-yellow-500 text-black",
+  low: "bg-blue-500 text-white",
+  info: "bg-gray-500 text-white",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  open: "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200",
+  investigating: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200",
+  resolved: "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
+  closed: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
 };
 
 export default function FindingsPage() {
@@ -39,23 +56,37 @@ export default function FindingsPage() {
               <tr>
                 <th className="text-left p-3">Risk</th>
                 <th className="text-left p-3">Severity</th>
-                <th className="text-left p-3">Tool</th>
+                <th className="text-left p-3">Status</th>
                 <th className="text-left p-3">Title</th>
                 <th className="text-left p-3">Asset</th>
-                <th className="text-left p-3">Occur</th>
+                <th className="text-left p-3">Assignee</th>
                 <th className="text-left p-3">Last seen</th>
+                <th className="text-left p-3"></th>
               </tr>
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
               {data.results.map((f) => (
-                <tr key={f.id} className="border-t border-gray-200 dark:border-gray-700">
+                <tr key={f.id} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="p-3 font-semibold">{f.risk_score}</td>
-                  <td className="p-3">{f.severity}</td>
-                  <td className="p-3">{f.tool}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${SEVERITY_COLORS[f.severity] || "bg-gray-400"}`}>
+                      {f.severity}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[f.status] || ""}`}>
+                      {f.status}
+                    </span>
+                  </td>
                   <td className="p-3">{f.title}</td>
                   <td className="p-3">{f.asset}</td>
-                  <td className="p-3">{f.occurrences}</td>
-                  <td className="p-3 text-gray-500 dark:text-gray-400">{f.last_seen}</td>
+                  <td className="p-3 text-gray-500 dark:text-gray-400">{f.assignee || "-"}</td>
+                  <td className="p-3 text-gray-500 dark:text-gray-400">{new Date(f.last_seen).toLocaleDateString()}</td>
+                  <td className="p-3">
+                    <Link href={`/findings/${f.id}`} className="text-indigo-600 dark:text-indigo-400 hover:underline text-sm">
+                      View
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

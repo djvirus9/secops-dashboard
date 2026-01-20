@@ -327,6 +327,8 @@ def get_finding(finding_id: str):
 # -----------------------------
 # Update finding (status, assignee)
 # -----------------------------
+ALLOWED_STATUSES = {"open", "investigating", "resolved", "closed"}
+
 class FindingUpdate(BaseModel):
     status: Optional[str] = None
     assignee: Optional[str] = None
@@ -335,6 +337,12 @@ class FindingUpdate(BaseModel):
 def update_finding(finding_id: str, payload: FindingUpdate):
     db: Session = SessionLocal()
     try:
+        if payload.status is not None and payload.status not in ALLOWED_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{payload.status}'. Allowed: {', '.join(sorted(ALLOWED_STATUSES))}"
+            )
+
         finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
