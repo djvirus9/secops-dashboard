@@ -87,6 +87,9 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 - Automatic signal deduplication via fingerprinting
 - Auto-upsert assets when ingesting signals
 - Risk scoring based on severity, exposure, and criticality
+- Triage workflow with status transitions (open, investigating, resolved, closed)
+- Finding assignment to team members
+- Activity tracking with comments and automatic status change logging
 
 ## Recent Changes
 - 2026-01-18: Initial Replit environment setup
@@ -94,3 +97,4 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 - 2026-01-18: Added dark/light mode toggle feature
 - 2026-01-20: PostgreSQL database setup with Asset, Finding, Signal models
 - 2026-01-20: Added asset inventory page with ownership, criticality, and exposure management
+- 2026-01-20: Added triage workflow with status/assignment changes and comment tracking
