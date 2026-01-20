@@ -93,3 +93,4 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 - 2026-01-18: Added Next.js + Tailwind frontend with all pages
 - 2026-01-18: Added dark/light mode toggle feature
 - 2026-01-20: PostgreSQL database setup with Asset, Finding, Signal models
+- 2026-01-20: Added asset inventory page with ownership, criticality, and exposure management
