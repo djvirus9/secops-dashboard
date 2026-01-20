@@ -22,6 +22,16 @@ backend/            # FastAPI backend
     main.py         # API entry point with all routes
     db.py           # Database connection (SQLAlchemy)
     models.py       # Database models (Asset, Finding, Signal)
+    parsers/        # Security scanner parsers
+      base.py       # Base parser class and registry
+      registry.py   # Parser auto-detection and lookup
+      sast/         # SAST tool parsers (Semgrep, Bandit, etc.)
+      dast/         # DAST tool parsers (ZAP, Burp, Nuclei, etc.)
+      sca/          # SCA tool parsers (Trivy, Snyk, npm audit, etc.)
+      infrastructure/  # IaC parsers (Checkov, KICS, Prowler, etc.)
+      container/    # Container security parsers (Clair, Anchore, etc.)
+      cloud/        # Cloud security parsers (AWS Hub, Azure, GCP)
+      generic/      # Generic parsers (SARIF, JSON, CSV)
   requirements.txt
 
 infra/
@@ -86,6 +96,9 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 - `GET /risks/assets` - Risk with asset joins
 - `GET /integrations` - Get integration configuration status
 - `POST /integrations/slack/test` - Send test Slack notification
+- `GET /parsers` - List all available security scanner parsers
+- `GET /parsers/{name}` - Get parser details
+- `POST /import/scan` - Import scan results with auto-detection or explicit parser
 
 ## Integrations
 
@@ -107,6 +120,30 @@ Set these secrets to enable automatic issue creation:
 - Triage workflow with status transitions (open, investigating, resolved, closed)
 - Finding assignment to team members
 - Activity tracking with comments and automatic status change logging
+- 44+ security scanner integrations with auto-detection
+- Scan result import with unified parsing
+
+## Scanner Integrations (44+ tools)
+### SAST (10 parsers)
+Semgrep, Bandit, ESLint, Gitleaks, Gosec, Brakeman, Bearer CLI, CodeQL, SonarQube, PHPStan
+
+### DAST (7 parsers)
+OWASP ZAP, Burp Suite, Nuclei, Acunetix, Nikto, Arachni, Netsparker/Invicti
+
+### SCA (9 parsers)
+Trivy, OWASP Dependency-Check, Snyk, npm audit, pip-audit, Safety, Grype, OSV Scanner, CycloneDX
+
+### Infrastructure (6 parsers)
+Checkov, KICS, Prowler, tfsec, Terrascan, Kubesec
+
+### Container (5 parsers)
+Clair, Anchore, Docker Bench, Hadolint, Dockle
+
+### Cloud (4 parsers)
+AWS Security Hub, Azure Security Center, GCP Security Command Center, Scout Suite
+
+### Generic (3 parsers)
+SARIF, Generic JSON, Generic CSV
 
 ## Recent Changes
 - 2026-01-18: Initial Replit environment setup
@@ -116,3 +153,5 @@ Set these secrets to enable automatic issue creation:
 - 2026-01-20: Added asset inventory page with ownership, criticality, and exposure management
 - 2026-01-20: Added triage workflow with status/assignment changes and comment tracking
 - 2026-01-20: Added Slack and Jira notification integrations for critical/high findings
+- 2026-01-20: Added modular parser architecture with 44+ security scanner integrations
+- 2026-01-20: Added scan import API with auto-detection and frontend UI
