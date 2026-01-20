@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from .db import engine, SessionLocal, Base
-from .models import Signal, Finding, Asset
+from .models import Signal, Finding, Asset, Comment
 
 app = FastAPI(title="SecOps Dashboard API", version="0.5.0")
 
@@ -265,6 +265,7 @@ def list_findings(limit: int = 100):
                     "exposure": f.exposure,
                     "criticality": f.criticality,
                     "status": f.status,
+                    "assignee": f.assignee,
                     "risk_score": f.risk_score,
                     "occurrences": f.occurrences,
                     "first_seen": f.first_seen.isoformat() + "Z",
@@ -273,6 +274,145 @@ def list_findings(limit: int = 100):
                 }
                 for f in rows
             ],
+        }
+    finally:
+        db.close()
+
+# -----------------------------
+# Get single finding with comments
+# -----------------------------
+@app.get("/findings/{finding_id}")
+def get_finding(finding_id: str):
+    db: Session = SessionLocal()
+    try:
+        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        if not finding:
+            raise HTTPException(status_code=404, detail="Finding not found")
+
+        comments = db.execute(
+            select(Comment).where(Comment.finding_id == finding_id).order_by(Comment.created_at.desc())
+        ).scalars().all()
+
+        return {
+            "id": finding.id,
+            "fingerprint": finding.fingerprint,
+            "tool": finding.tool,
+            "title": finding.title,
+            "severity": finding.severity,
+            "asset": finding.asset,
+            "asset_id": finding.asset_id,
+            "exposure": finding.exposure,
+            "criticality": finding.criticality,
+            "status": finding.status,
+            "assignee": finding.assignee,
+            "risk_score": finding.risk_score,
+            "occurrences": finding.occurrences,
+            "first_seen": finding.first_seen.isoformat() + "Z",
+            "last_seen": finding.last_seen.isoformat() + "Z",
+            "signal_id": finding.signal_id,
+            "comments": [
+                {
+                    "id": c.id,
+                    "author": c.author,
+                    "content": c.content,
+                    "action_type": c.action_type,
+                    "created_at": c.created_at.isoformat() + "Z",
+                }
+                for c in comments
+            ],
+        }
+    finally:
+        db.close()
+
+# -----------------------------
+# Update finding (status, assignee)
+# -----------------------------
+class FindingUpdate(BaseModel):
+    status: Optional[str] = None
+    assignee: Optional[str] = None
+
+@app.patch("/findings/{finding_id}")
+def update_finding(finding_id: str, payload: FindingUpdate):
+    db: Session = SessionLocal()
+    try:
+        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        if not finding:
+            raise HTTPException(status_code=404, detail="Finding not found")
+
+        now = datetime.utcnow()
+        changes = []
+
+        if payload.status is not None and payload.status != finding.status:
+            old_status = finding.status
+            finding.status = payload.status
+            changes.append(f"Status changed from '{old_status}' to '{payload.status}'")
+
+        if payload.assignee is not None and payload.assignee != finding.assignee:
+            old_assignee = finding.assignee or "unassigned"
+            finding.assignee = payload.assignee if payload.assignee else None
+            new_assignee = payload.assignee or "unassigned"
+            changes.append(f"Assignee changed from '{old_assignee}' to '{new_assignee}'")
+
+        if changes:
+            comment = Comment(
+                finding_id=finding.id,
+                author="system",
+                content="; ".join(changes),
+                action_type="update",
+                created_at=now,
+            )
+            db.add(comment)
+
+        db.commit()
+        db.refresh(finding)
+
+        return {
+            "ok": True,
+            "finding": {
+                "id": finding.id,
+                "status": finding.status,
+                "assignee": finding.assignee,
+            },
+            "changes": changes,
+        }
+    finally:
+        db.close()
+
+# -----------------------------
+# Add comment to finding
+# -----------------------------
+class CommentIn(BaseModel):
+    author: str = Field(..., examples=["john"])
+    content: str = Field(..., examples=["Looking into this issue"])
+
+@app.post("/findings/{finding_id}/comments")
+def add_comment(finding_id: str, payload: CommentIn):
+    db: Session = SessionLocal()
+    try:
+        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        if not finding:
+            raise HTTPException(status_code=404, detail="Finding not found")
+
+        comment = Comment(
+            finding_id=finding.id,
+            author=payload.author,
+            content=payload.content,
+            action_type="comment",
+            created_at=datetime.utcnow(),
+        )
+        db.add(comment)
+        db.commit()
+        db.refresh(comment)
+
+        return {
+            "ok": True,
+            "comment": {
+                "id": comment.id,
+                "author": comment.author,
+                "content": comment.content,
+                "action_type": comment.action_type,
+                "created_at": comment.created_at.isoformat() + "Z",
+            },
         }
     finally:
         db.close()
