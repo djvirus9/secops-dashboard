@@ -75,12 +75,29 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 
 ## API Endpoints
 - `GET /health` - Health check
-- `POST /ingest/signal` - Ingest security signals (with dedupe)
+- `POST /ingest/signal` - Ingest security signals (with dedupe, triggers notifications)
 - `GET /findings` - List all findings
+- `GET /findings/{id}` - Get finding details with comments
+- `PATCH /findings/{id}` - Update finding status/assignee
+- `POST /findings/{id}/comments` - Add comment to finding
 - `GET /assets` - List all assets
 - `POST /assets/upsert` - Create or update an asset
 - `GET /risks` - Risk aggregation by asset
 - `GET /risks/assets` - Risk with asset joins
+- `GET /integrations` - Get integration configuration status
+- `POST /integrations/slack/test` - Send test Slack notification
+
+## Integrations
+
+### Slack Notifications
+Set `SLACK_WEBHOOK_URL` secret to enable. Sends notifications for critical/high severity findings.
+
+### Jira Issue Creation
+Set these secrets to enable automatic issue creation:
+- `JIRA_BASE_URL` - e.g., https://yourcompany.atlassian.net
+- `JIRA_EMAIL` - Your Atlassian email
+- `JIRA_API_TOKEN` - API token from Atlassian
+- `JIRA_PROJECT_KEY` - e.g., SEC
 
 ## Features
 - Dark/Light mode toggle (persists to localStorage)
@@ -98,3 +115,4 @@ risk_score = severity_weight × exposure_weight × criticality_weight × 10
 - 2026-01-20: PostgreSQL database setup with Asset, Finding, Signal models
 - 2026-01-20: Added asset inventory page with ownership, criticality, and exposure management
 - 2026-01-20: Added triage workflow with status/assignment changes and comment tracking
+- 2026-01-20: Added Slack and Jira notification integrations for critical/high findings

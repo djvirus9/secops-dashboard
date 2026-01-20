@@ -4,16 +4,20 @@ from datetime import datetime
 from typing import Optional
 import json
 import hashlib
+import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from .db import engine, SessionLocal, Base
 from .models import Signal, Finding, Asset, Comment
+from .notifications import send_slack_notification, send_slack_notification_sync, create_jira_issue, create_jira_issue_sync
 
-app = FastAPI(title="SecOps Dashboard API", version="0.5.0")
+app = FastAPI(title="SecOps Dashboard API", version="0.6.0")
+
+NOTIFY_SEVERITIES = {"critical", "high"}
 
 # -----------------------------
 # Risk scoring
@@ -155,16 +159,60 @@ def upsert_asset(payload: dict):
         db.close()
 
 # -----------------------------
+# Background notification task (synchronous for BackgroundTasks)
+# -----------------------------
+import logging
+
+logger = logging.getLogger(__name__)
+
+def run_notifications_sync(
+    title: str,
+    severity: str,
+    asset: str,
+    risk_score: int,
+    finding_id: str,
+    tool: str,
+    is_new: bool,
+    occurrences: int,
+):
+    try:
+        slack_result = send_slack_notification_sync(
+            title=title,
+            severity=severity,
+            asset=asset,
+            risk_score=risk_score,
+            finding_id=finding_id,
+            tool=tool,
+            is_new=is_new,
+            occurrences=occurrences,
+        )
+        if slack_result:
+            logger.info(f"Slack notification: {slack_result}")
+
+        if is_new and severity.lower() in {"critical", "high"}:
+            jira_result = create_jira_issue_sync(
+                title=title,
+                severity=severity,
+                asset=asset,
+                risk_score=risk_score,
+                finding_id=finding_id,
+                tool=tool,
+            )
+            if jira_result:
+                logger.info(f"Jira issue created: {jira_result}")
+    except Exception as e:
+        logger.error(f"Notification error: {e}")
+
+# -----------------------------
 # Ingest (signals + findings with dedupe)
 # -----------------------------
 @app.post("/ingest/signal")
-def ingest_signal(payload: SignalIn):
+def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
     db: Session = SessionLocal()
     try:
         now = datetime.utcnow()
         asset_key = (payload.asset or "unknown").strip().lower()
 
-        # Ensure asset exists (auto-upsert minimal asset)
         asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
         if asset is None:
             asset = Asset(
@@ -178,12 +226,11 @@ def ingest_signal(payload: SignalIn):
                 updated_at=now,
             )
             db.add(asset)
-            db.flush()  # get asset.id
+            db.flush()
 
-        # Store raw signal
         signal = Signal(tool=payload.tool, payload=json.dumps(payload.model_dump()))
         db.add(signal)
-        db.flush()  # get signal.id
+        db.flush()
 
         risk_score = compute_risk_score(payload.severity, payload.exposure, payload.criticality)
         fp = make_fingerprint(payload.tool, payload.title, asset_key)
@@ -198,6 +245,20 @@ def ingest_signal(payload: SignalIn):
             existing.asset_id = asset.id
             db.add(existing)
             db.commit()
+
+            if payload.severity.lower() in NOTIFY_SEVERITIES:
+                background_tasks.add_task(
+                    run_notifications_sync,
+                    title=payload.title,
+                    severity=payload.severity,
+                    asset=asset_key,
+                    risk_score=existing.risk_score,
+                    finding_id=existing.id,
+                    tool=payload.tool,
+                    is_new=False,
+                    occurrences=existing.occurrences,
+                )
+
             return {
                 "accepted": True,
                 "deduped": True,
@@ -227,6 +288,19 @@ def ingest_signal(payload: SignalIn):
         db.add(finding)
         db.commit()
         db.refresh(finding)
+
+        if payload.severity.lower() in NOTIFY_SEVERITIES:
+            background_tasks.add_task(
+                run_notifications_sync,
+                title=payload.title,
+                severity=payload.severity,
+                asset=asset_key,
+                risk_score=risk_score,
+                finding_id=finding.id,
+                tool=payload.tool,
+                is_new=True,
+                occurrences=1,
+            )
 
         return {
             "accepted": True,
@@ -498,3 +572,52 @@ def risks_by_asset(limit: int = 100):
         return {"count": len(results), "results": results}
     finally:
         db.close()
+
+# -----------------------------
+# Integrations status
+# -----------------------------
+@app.get("/integrations")
+def get_integrations_status():
+    slack_webhook = os.environ.get("SLACK_WEBHOOK_URL")
+    jira_base = os.environ.get("JIRA_BASE_URL")
+    jira_email = os.environ.get("JIRA_EMAIL")
+    jira_token = os.environ.get("JIRA_API_TOKEN")
+    jira_project = os.environ.get("JIRA_PROJECT_KEY")
+
+    return {
+        "slack": {
+            "configured": bool(slack_webhook),
+            "description": "Send notifications to Slack for critical/high severity findings",
+        },
+        "jira": {
+            "configured": all([jira_base, jira_email, jira_token, jira_project]),
+            "description": "Automatically create Jira issues for new critical/high findings",
+            "project_key": jira_project if jira_project else None,
+        },
+    }
+
+# -----------------------------
+# Test Slack notification
+# -----------------------------
+@app.post("/integrations/slack/test")
+async def test_slack():
+    from .notifications import send_slack_notification
+    
+    if not os.environ.get("SLACK_WEBHOOK_URL"):
+        raise HTTPException(status_code=400, detail="SLACK_WEBHOOK_URL not configured")
+    
+    result = await send_slack_notification(
+        title="Test Notification",
+        severity="info",
+        asset="test-asset",
+        risk_score=10,
+        finding_id="test-123",
+        tool="secops-dashboard",
+        is_new=True,
+        occurrences=1,
+    )
+    
+    if result and result.get("ok"):
+        return {"ok": True, "message": "Test notification sent successfully"}
+    else:
+        raise HTTPException(status_code=500, detail=f"Failed to send: {result}")
