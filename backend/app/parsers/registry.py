@@ -9,6 +9,10 @@ from .infrastructure import *
 from .container import *
 from .cloud import *
 from .generic import *
+from .bugbounty import *
+from .network import *
+from .mobile import *
+from .other import *
 
 
 def get_parser(name: str) -> Optional[BaseParser]:

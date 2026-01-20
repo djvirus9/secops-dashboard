@@ -16,6 +16,10 @@ class ScannerCategory(str, Enum):
     CLOUD = "cloud"
     SECRETS = "secrets"
     GENERIC = "generic"
+    BUGBOUNTY = "bugbounty"
+    NETWORK = "network"
+    MOBILE = "mobile"
+    OTHER = "other"
 
 
 class Severity(str, Enum):

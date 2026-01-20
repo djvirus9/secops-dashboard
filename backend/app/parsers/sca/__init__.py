@@ -7,6 +7,13 @@ from .safety import SafetyParser
 from .grype import GrypeParser
 from .osv import OSVParser
 from .cyclonedx import CycloneDXParser
+from .auditjs import AuditJSParser
+from .bundler_audit import BundlerAuditParser
+from .cargo_audit import CargoAuditParser
+from .blackduck import BlackDuckParser
+from .jfrog_xray import JFrogXrayParser
+from .govulncheck import GovulncheckParser
+from .retirejs import RetireJSParser
 
 __all__ = [
     "TrivyParser",
@@ -18,4 +25,11 @@ __all__ = [
     "GrypeParser",
     "OSVParser",
     "CycloneDXParser",
+    "AuditJSParser",
+    "BundlerAuditParser",
+    "CargoAuditParser",
+    "BlackDuckParser",
+    "JFrogXrayParser",
+    "GovulncheckParser",
+    "RetireJSParser",
 ]

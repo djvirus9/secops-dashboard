@@ -45,6 +45,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   cloud: "Cloud Security",
   secrets: "Secrets Detection",
   generic: "Generic Formats",
+  bugbounty: "Bug Bounty Platforms",
+  network: "Network Scanning",
+  mobile: "Mobile Security",
+  other: "Other Tools",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -56,6 +60,10 @@ const CATEGORY_COLORS: Record<string, string> = {
   cloud: "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200",
   secrets: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200",
   generic: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
+  bugbounty: "bg-pink-100 text-pink-800 dark:bg-pink-900/50 dark:text-pink-200",
+  network: "bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200",
+  mobile: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200",
+  other: "bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200",
 };
 
 export default function Integrations() {

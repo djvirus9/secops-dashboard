@@ -120,30 +120,46 @@ Set these secrets to enable automatic issue creation:
 - Triage workflow with status transitions (open, investigating, resolved, closed)
 - Finding assignment to team members
 - Activity tracking with comments and automatic status change logging
-- 44+ security scanner integrations with auto-detection
+- 98+ security scanner integrations with auto-detection (matching DefectDojo coverage)
 - Scan result import with unified parsing
 
-## Scanner Integrations (44+ tools)
-### SAST (10 parsers)
-Semgrep, Bandit, ESLint, Gitleaks, Gosec, Brakeman, Bearer CLI, CodeQL, SonarQube, PHPStan
+## Scanner Integrations (98 tools across 12 categories)
 
-### DAST (7 parsers)
-OWASP ZAP, Burp Suite, Nuclei, Acunetix, Nikto, Arachni, Netsparker/Invicti
+### SAST (19 parsers)
+Semgrep, Bandit, ESLint, Gitleaks, Gosec, Brakeman, Bearer CLI, CodeQL, SonarQube, PHPStan, Checkmarx, Fortify, Coverity, Contrast Security, CredScan, DawnScanner, Detect-Secrets, GitGuardian, Horusec, NoseyParker
 
-### SCA (9 parsers)
-Trivy, OWASP Dependency-Check, Snyk, npm audit, pip-audit, Safety, Grype, OSV Scanner, CycloneDX
+### DAST (16 parsers)
+OWASP ZAP, Burp Suite, Burp Enterprise, Nuclei, Acunetix, Nikto, Arachni, Netsparker/Invicti, AppSpider, Crashtest Security, Edgescan, HCL AppScan, IBM AppScan, ImmuniWeb, MobSF, WebInspect
 
-### Infrastructure (6 parsers)
-Checkov, KICS, Prowler, tfsec, Terrascan, Kubesec
+### SCA (16 parsers)
+Trivy, OWASP Dependency-Check, Snyk, npm audit, pip-audit, Safety, Grype, OSV Scanner, CycloneDX, AuditJS, Bundler-Audit, Cargo Audit, Black Duck, JFrog Xray, Govulncheck, Retire.js
 
-### Container (5 parsers)
-Clair, Anchore, Docker Bench, Hadolint, Dockle
+### Infrastructure (13 parsers)
+Checkov, KICS, Prowler, tfsec, Terrascan, Kubesec, CloudSploit, GitLab SAST, kube-bench, kube-hunter, Qualys, Nessus, OpenVAS
+
+### Container (10 parsers)
+Clair, Anchore, Docker Bench, Hadolint, Dockle, Aqua Security, Harbor, NeuVector, Twistlock/Prisma Cloud, Sysdig
 
 ### Cloud (4 parsers)
 AWS Security Hub, Azure Security Center, GCP Security Command Center, Scout Suite
 
+### Network (4 parsers)
+Nmap, Masscan, SSLyze, testssl.sh
+
+### Bug Bounty (3 parsers)
+HackerOne, Bugcrowd, Cobalt.io
+
+### Mobile (2 parsers)
+QARK, AndroBugs
+
+### Other (7 parsers)
+DrHeader, HuskyCI, IntSights, Outpost24, ORT, 42Crunch, GitHub Advanced Security
+
 ### Generic (3 parsers)
 SARIF, Generic JSON, Generic CSV
+
+### Secrets (1 parser)
+Gitleaks (dedicated secrets category)
 
 ## Recent Changes
 - 2026-01-18: Initial Replit environment setup
@@ -155,3 +171,4 @@ SARIF, Generic JSON, Generic CSV
 - 2026-01-20: Added Slack and Jira notification integrations for critical/high findings
 - 2026-01-20: Added modular parser architecture with 44+ security scanner integrations
 - 2026-01-20: Added scan import API with auto-detection and frontend UI
+- 2026-01-20: Expanded to 98 security scanner parsers across 12 categories
