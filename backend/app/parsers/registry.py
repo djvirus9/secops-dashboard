@@ -13,6 +13,7 @@ from .bugbounty import *
 from .network import *
 from .mobile import *
 from .other import *
+from .secrets import *
 
 
 def get_parser(name: str) -> Optional[BaseParser]:

@@ -1,4 +1,7 @@
-from .qark import QarkParser
 from .androbugs import AndrobugsParser
+from .qark import QarkParser
 
-__all__ = ["QarkParser", "AndrobugsParser"]
+__all__ = [
+    "AndrobugsParser",
+    "QarkParser",
+]

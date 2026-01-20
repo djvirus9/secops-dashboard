@@ -120,31 +120,31 @@ Set these secrets to enable automatic issue creation:
 - Triage workflow with status transitions (open, investigating, resolved, closed)
 - Finding assignment to team members
 - Activity tracking with comments and automatic status change logging
-- 98+ security scanner integrations with auto-detection (matching DefectDojo coverage)
+- 150+ security scanner integrations with auto-detection (matching DefectDojo coverage)
 - Scan result import with unified parsing
 
-## Scanner Integrations (98 tools across 12 categories)
+## Scanner Integrations (151 tools across 12 categories)
 
-### SAST (19 parsers)
-Semgrep, Bandit, ESLint, Gitleaks, Gosec, Brakeman, Bearer CLI, CodeQL, SonarQube, PHPStan, Checkmarx, Fortify, Coverity, Contrast Security, CredScan, DawnScanner, Detect-Secrets, GitGuardian, Horusec, NoseyParker
+### SAST (25 parsers)
+Semgrep, Bandit, ESLint, Gitleaks, Gosec, Brakeman, Bearer CLI, CodeQL, SonarQube, PHPStan, Checkmarx, Checkmarx One, Checkmarx CxFlow, Fortify, Coverity, Contrast Security, CredScan, DawnScanner, Detect-Secrets, GitGuardian, Horusec, NoseyParker, Kiuwan, CodeChecker, GitHub SAST, HCL AppScan on Cloud
 
-### DAST (16 parsers)
-OWASP ZAP, Burp Suite, Burp Enterprise, Nuclei, Acunetix, Nikto, Arachni, Netsparker/Invicti, AppSpider, Crashtest Security, Edgescan, HCL AppScan, IBM AppScan, ImmuniWeb, MobSF, WebInspect
+### DAST (22 parsers)
+OWASP ZAP, Burp Suite, Burp Enterprise, Burp Dastardly, Burp REST API, Nuclei, Acunetix, Nikto, Arachni, Netsparker, Invicti, AppSpider, AppCheck, Crashtest Security, Edgescan, HCL AppScan, IBM AppScan, ImmuniWeb, MobSF, WebInspect, GitLab DAST, GitLab API Fuzzing
 
-### SCA (16 parsers)
-Trivy, OWASP Dependency-Check, Snyk, npm audit, pip-audit, Safety, Grype, OSV Scanner, CycloneDX, AuditJS, Bundler-Audit, Cargo Audit, Black Duck, JFrog Xray, Govulncheck, Retire.js
+### SCA (28 parsers)
+Trivy, OWASP Dependency-Check, Snyk, npm audit, pip-audit, Safety, Grype, OSV Scanner, CycloneDX, AuditJS, Bundler-Audit, Cargo Audit, Black Duck, Black Duck Binary, Black Duck Component, JFrog Xray, JFrog Unified, JFrog Binary, Govulncheck, Retire.js, Dependency-Track, Nancy, Mend, Meterian, NSP, Kiuwan SCA, GitHub Vulnerability, GitLab Dependency Scan
 
-### Infrastructure (13 parsers)
-Checkov, KICS, Prowler, tfsec, Terrascan, Kubesec, CloudSploit, GitLab SAST, kube-bench, kube-hunter, Qualys, Nessus, OpenVAS
+### Infrastructure (20 parsers)
+Checkov, KICS, Prowler, tfsec, Terrascan, Kubesec, CloudSploit, GitLab SAST, kube-bench, kube-hunter, Qualys, Nessus, OpenVAS, Kubescape, Kubeaudit, Legitify, OpenSCAP, Nexpose, Chef InSpec, KrakenD Audit, GitLab Container Scan
 
-### Container (10 parsers)
-Clair, Anchore, Docker Bench, Hadolint, Dockle, Aqua Security, Harbor, NeuVector, Twistlock/Prisma Cloud, Sysdig
+### Container (15 parsers)
+Clair, Anchore, Anchore Enterprise, AnchoreCTL, Docker Bench, Hadolint, Dockle, Aqua Security, Harbor, NeuVector, Twistlock/Prisma Cloud, Sysdig, Deepfence ThreatMapper, DSOP
 
-### Cloud (4 parsers)
-AWS Security Hub, Azure Security Center, GCP Security Command Center, Scout Suite
+### Cloud (11 parsers)
+AWS Security Hub, AWS Inspector2, AWS ASFF, Azure Security Center, GCP Security Command Center, GCP Artifact Scan, Scout Suite, Cloudflare Insights, Microsoft Defender, Cycognito, Wiz
 
-### Network (4 parsers)
-Nmap, Masscan, SSLyze, testssl.sh
+### Network (6 parsers)
+Nmap, Masscan, SSLyze, testssl.sh, Hydra, OpenReports
 
 ### Bug Bounty (3 parsers)
 HackerOne, Bugcrowd, Cobalt.io
@@ -152,14 +152,14 @@ HackerOne, Bugcrowd, Cobalt.io
 ### Mobile (2 parsers)
 QARK, AndroBugs
 
-### Other (7 parsers)
-DrHeader, HuskyCI, IntSights, Outpost24, ORT, 42Crunch, GitHub Advanced Security
+### Other (11 parsers)
+DrHeader, HuskyCI, IntSights, Outpost24, ORT, 42Crunch, GitHub Advanced Security, Cyberwatch, Humble, Mozilla Observatory, Mayhem
 
 ### Generic (3 parsers)
 SARIF, Generic JSON, Generic CSV
 
-### Secrets (1 parser)
-Gitleaks (dedicated secrets category)
+### Secrets (5 parsers)
+Gitleaks, Ggshield, GitHub Secrets, GitLab Secrets, N0s1
 
 ## Recent Changes
 - 2026-01-18: Initial Replit environment setup
@@ -171,4 +171,4 @@ Gitleaks (dedicated secrets category)
 - 2026-01-20: Added Slack and Jira notification integrations for critical/high findings
 - 2026-01-20: Added modular parser architecture with 44+ security scanner integrations
 - 2026-01-20: Added scan import API with auto-detection and frontend UI
-- 2026-01-20: Expanded to 98 security scanner parsers across 12 categories
+- 2026-01-20: Expanded to 151 security scanner parsers across 12 categories (matching DefectDojo)

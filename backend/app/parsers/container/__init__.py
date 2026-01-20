@@ -1,23 +1,31 @@
-from .clair import ClairParser
 from .anchore import AnchoreParser
-from .docker_bench import DockerBenchParser
-from .hadolint import HadolintParser
-from .dockle import DockleParser
+from .anchore_enterprise import AnchoreEnterpriseParser
+from .anchorectl import AnchoreCTLParser
 from .aqua import AquaParser
+from .clair import ClairParser
+from .deepfence import DeepfenceParser
+from .docker_bench import DockerBenchParser
+from .dockle import DockleParser
+from .dsop import DSOPParser
+from .hadolint import HadolintParser
 from .harbor import HarborParser
 from .neuvector import NeuVectorParser
-from .twistlock import TwistlockParser
 from .sysdig import SysdigParser
+from .twistlock import TwistlockParser
 
 __all__ = [
-    "ClairParser",
     "AnchoreParser",
-    "DockerBenchParser",
-    "HadolintParser",
-    "DockleParser",
+    "AnchoreEnterpriseParser",
+    "AnchoreCTLParser",
     "AquaParser",
+    "ClairParser",
+    "DeepfenceParser",
+    "DockerBenchParser",
+    "DockleParser",
+    "DSOPParser",
+    "HadolintParser",
     "HarborParser",
     "NeuVectorParser",
-    "TwistlockParser",
     "SysdigParser",
+    "TwistlockParser",
 ]
