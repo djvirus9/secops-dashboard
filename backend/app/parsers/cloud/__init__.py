@@ -9,6 +9,12 @@ from .gcp_scc import GCPSecurityCommandCenterParser
 from .ms_defender import MSDefenderParser
 from .scout_suite import ScoutSuiteParser
 from .wiz import WizParser
+from .orca_security import OrcaSecurityParser
+from .risk_recon import RiskReconParser
+from .xygeni import XygeniParser
+from .wizcli_dir import WizCLIDirParser
+from .wizcli_iac import WizCLIIaCParser
+from .wizcli_img import WizCLIImgParser
 
 __all__ = [
     "AWSASFFParser",
@@ -22,4 +28,10 @@ __all__ = [
     "MSDefenderParser",
     "ScoutSuiteParser",
     "WizParser",
+    "OrcaSecurityParser",
+    "RiskReconParser",
+    "XygeniParser",
+    "WizCLIDirParser",
+    "WizCLIIaCParser",
+    "WizCLIImgParser",
 ]

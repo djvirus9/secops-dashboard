@@ -25,6 +25,13 @@ from .retirejs import RetireJSParser
 from .safety import SafetyParser
 from .snyk import SnykParser
 from .trivy import TrivyParser
+from .yarn_audit import YarnAuditParser
+from .sonatype import SonatypeParser
+from .ossindex_devaudit import OssIndexDevauditParser
+from .npm_audit_7_plus import NpmAudit7PlusParser
+from .xeol import XeolParser
+from .scantist import ScantistParser
+from .reversinglabs_spectraassure import ReversinglabsSpectraassureParser
 
 __all__ = [
     "AuditJSParser",
@@ -54,4 +61,11 @@ __all__ = [
     "SafetyParser",
     "SnykParser",
     "TrivyParser",
+    "YarnAuditParser",
+    "SonatypeParser",
+    "OssIndexDevauditParser",
+    "NpmAudit7PlusParser",
+    "XeolParser",
+    "ScantistParser",
+    "ReversinglabsSpectraassureParser",
 ]

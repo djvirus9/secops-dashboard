@@ -12,6 +12,13 @@ from .harbor import HarborParser
 from .neuvector import NeuVectorParser
 from .sysdig import SysdigParser
 from .twistlock import TwistlockParser
+from .mobsf_scorecard import MobSFScorecardParser
+from .neuvector_compliance import NeuVectorComplianceParser
+from .trivy_operator import TrivyOperatorParser
+from .anchore_engine import AnchoreEngineParser
+from .anchore_grype import AnchoreGrypeParser
+from .anchorectl_policies import AnchoreCTLPoliciesParser
+from .anchorectl_vulns import AnchoreCTLVulnsParser
 
 __all__ = [
     "AnchoreParser",
@@ -28,4 +35,11 @@ __all__ = [
     "NeuVectorParser",
     "SysdigParser",
     "TwistlockParser",
+    "MobSFScorecardParser",
+    "NeuVectorComplianceParser",
+    "TrivyOperatorParser",
+    "AnchoreEngineParser",
+    "AnchoreGrypeParser",
+    "AnchoreCTLPoliciesParser",
+    "AnchoreCTLVulnsParser",
 ]

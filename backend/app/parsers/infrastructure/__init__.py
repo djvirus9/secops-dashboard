@@ -22,6 +22,16 @@ from .prowler import ProwlerParser
 from .qualys import QualysParser
 from .terrascan import TerrascanParser
 from .tfsec import TfsecParser
+from .zora import ZoraParser
+from .popeye import PopeyeParser
+from .pingcastle import PingCastleParser
+from .picus import PicusParser
+from .threagile import ThreagileParser
+from .threat_composer import ThreatComposerParser
+from .tenable import TenableParser
+from .redhatsatellite import RedHatSatelliteParser
+from .wazuh import WazuhParser
+from .alertlogic import AlertLogicParser
 
 __all__ = [
     "CheckovParser",
@@ -48,4 +58,14 @@ __all__ = [
     "QualysParser",
     "TerrascanParser",
     "TfsecParser",
+    "ZoraParser",
+    "PopeyeParser",
+    "PingCastleParser",
+    "PicusParser",
+    "ThreagileParser",
+    "ThreatComposerParser",
+    "TenableParser",
+    "RedHatSatelliteParser",
+    "WazuhParser",
+    "AlertLogicParser",
 ]

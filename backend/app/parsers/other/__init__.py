@@ -9,6 +9,12 @@ from .mayhem import MayhemParser
 from .mozilla_observatory import MozillaObservatoryParser
 from .ort import ORTParser
 from .outpost24 import Outpost24Parser
+from .api_blackduck import ApiBlackDuckParser
+from .api_bugcrowd import ApiBugcrowdParser
+from .api_cobalt import ApiCobaltParser
+from .api_edgescan import ApiEdgescanParser
+from .api_sonarqube import ApiSonarQubeParser
+from .api_vulners import ApiVulnersParser
 
 __all__ = [
     "Crunch42Parser",
@@ -22,4 +28,10 @@ __all__ = [
     "MozillaObservatoryParser",
     "ORTParser",
     "Outpost24Parser",
+    "ApiBlackDuckParser",
+    "ApiBugcrowdParser",
+    "ApiCobaltParser",
+    "ApiEdgescanParser",
+    "ApiSonarQubeParser",
+    "ApiVulnersParser",
 ]
