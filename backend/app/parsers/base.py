@@ -148,6 +148,9 @@ class ParserRegistry:
     @classmethod
     def auto_detect(cls, content: str, filename: Optional[str] = None) -> Optional[Type[BaseParser]]:
         for parser_class in cls._parsers.values():
-            if parser_class.can_parse(content, filename):
-                return parser_class
+            try:
+                if parser_class.can_parse(content, filename):
+                    return parser_class
+            except Exception:
+                continue
         return None
