@@ -70,7 +70,7 @@ export default function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">API health + ingest test + live wiring (MVP).</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">Vulnerability management dashboard — ingest, triage, and track findings across your stack.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -99,13 +99,13 @@ export default function Dashboard() {
           </ul>
         </Card>
 
-        <Card title="What's next">
-          <ol className="list-decimal pl-5 text-sm text-gray-600 dark:text-gray-400 space-y-1">
-            <li>Persist to Postgres</li>
-            <li>Asset inventory + ownership</li>
-            <li>Correlation + dedupe</li>
-            <li>Jira/Slack integrations</li>
-          </ol>
+        <Card title="Quick Links">
+          <ul className="space-y-1 text-sm">
+            <li><a href="/findings" className="text-indigo-600 dark:text-indigo-400 hover:underline">Findings</a></li>
+            <li><a href="/assets" className="text-indigo-600 dark:text-indigo-400 hover:underline">Assets</a></li>
+            <li><a href="/risks" className="text-indigo-600 dark:text-indigo-400 hover:underline">Risk Register</a></li>
+            <li><a href="/integrations" className="text-indigo-600 dark:text-indigo-400 hover:underline">Integrations</a></li>
+          </ul>
         </Card>
       </div>
 

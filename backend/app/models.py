@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -61,6 +61,12 @@ class Finding(Base):
 
     risk_score: Mapped[int] = mapped_column(Integer, default=1)
     occurrences: Mapped[int] = mapped_column(Integer, default=1)
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cwe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cve_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

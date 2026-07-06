@@ -4,26 +4,38 @@ from datetime import datetime
 from typing import Optional
 import json
 import hashlib
+import logging
 import os
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
+from .auth import api_key_middleware
 from .db import engine, SessionLocal, Base
 from .models import Signal, Finding, Asset, Comment
-from .notifications import send_slack_notification, send_slack_notification_sync, create_jira_issue, create_jira_issue_sync
+from .notifications import send_slack_notification_sync, create_jira_issue_sync
 from .parsers import list_parsers, parse_scan_results, get_parser
 from .parsers.base import ScannerCategory
 
-app = FastAPI(title="SecOps Dashboard API", version="0.7.0")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="SecOps Dashboard API", version="0.8.0")
+
+app.middleware("http")(api_key_middleware)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:5000").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 NOTIFY_SEVERITIES = {"critical", "high"}
 
-# -----------------------------
-# Risk scoring
-# -----------------------------
 SEVERITY_WEIGHT = {
     "info": 1,
     "low": 3,
@@ -43,15 +55,44 @@ CRITICALITY_WEIGHT = {
     "high": 1.3,
 }
 
+
 def compute_risk_score(severity: str, exposure: str, criticality: str) -> int:
     s = SEVERITY_WEIGHT.get((severity or "").lower(), 1)
     e = EXPOSURE_WEIGHT.get((exposure or "").lower(), 1.0)
     c = CRITICALITY_WEIGHT.get((criticality or "").lower(), 1.0)
     return max(1, min(int(round(s * e * c * 10)), 200))
 
+
 def make_fingerprint(tool: str, title: str, asset_key: str) -> str:
     raw = f"{(tool or '').strip().lower()}|{(title or '').strip().lower()}|{(asset_key or '').strip().lower()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _serialize_finding(f: Finding) -> dict:
+    return {
+        "id": f.id,
+        "fingerprint": f.fingerprint,
+        "tool": f.tool,
+        "title": f.title,
+        "severity": f.severity,
+        "asset": f.asset,
+        "asset_id": f.asset_id,
+        "exposure": f.exposure,
+        "criticality": f.criticality,
+        "status": f.status,
+        "assignee": f.assignee,
+        "risk_score": f.risk_score,
+        "occurrences": f.occurrences,
+        "description": f.description,
+        "recommendation": f.recommendation,
+        "cwe_id": f.cwe_id,
+        "cve_id": f.cve_id,
+        "cvss_score": f.cvss_score,
+        "first_seen": f.first_seen.isoformat() + "Z",
+        "last_seen": f.last_seen.isoformat() + "Z",
+        "signal_id": f.signal_id,
+    }
+
 
 # -----------------------------
 # Schemas
@@ -64,13 +105,14 @@ class SignalIn(BaseModel):
     exposure: str = Field("internal", examples=["internet"])
     criticality: str = Field("medium", examples=["high"])
 
+
 # -----------------------------
 # Startup
 # -----------------------------
 @app.on_event("startup")
 def startup():
-    # Create missing tables (does NOT handle column migrations; we do that separately)
     Base.metadata.create_all(bind=engine)
+
 
 # -----------------------------
 # Health
@@ -79,19 +121,23 @@ def startup():
 def health():
     return {"status": "ok"}
 
+
 # -----------------------------
 # Assets
 # -----------------------------
 @app.get("/assets")
-def list_assets(limit: int = 100):
+def list_assets(limit: int = 100, offset: int = 0):
     db: Session = SessionLocal()
     try:
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
         rows = db.execute(
-            select(Asset).order_by(Asset.updated_at.desc()).limit(max(1, min(limit, 200)))
+            select(Asset).order_by(Asset.updated_at.desc()).offset(offset).limit(limit)
         ).scalars().all()
 
         return {
             "count": len(rows),
+            "offset": offset,
             "results": [
                 {
                     "id": a.id,
@@ -109,6 +155,7 @@ def list_assets(limit: int = 100):
         }
     finally:
         db.close()
+
 
 @app.post("/assets/upsert")
 def upsert_asset(payload: dict):
@@ -160,13 +207,10 @@ def upsert_asset(payload: dict):
     finally:
         db.close()
 
-# -----------------------------
-# Background notification task (synchronous for BackgroundTasks)
-# -----------------------------
-import logging
 
-logger = logging.getLogger(__name__)
-
+# -----------------------------
+# Background notifications
+# -----------------------------
 def run_notifications_sync(
     title: str,
     severity: str,
@@ -204,6 +248,7 @@ def run_notifications_sync(
                 logger.info(f"Jira issue created: {jira_result}")
     except Exception as e:
         logger.error(f"Notification error: {e}")
+
 
 # -----------------------------
 # Ingest (signals + findings with dedupe)
@@ -316,43 +361,28 @@ def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
     finally:
         db.close()
 
+
 # -----------------------------
 # List findings
 # -----------------------------
 @app.get("/findings")
-def list_findings(limit: int = 100):
+def list_findings(limit: int = 100, offset: int = 0):
     db: Session = SessionLocal()
     try:
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
         rows = db.execute(
-            select(Finding).order_by(Finding.last_seen.desc()).limit(max(1, min(limit, 200)))
+            select(Finding).order_by(Finding.last_seen.desc()).offset(offset).limit(limit)
         ).scalars().all()
 
         return {
             "count": len(rows),
-            "results": [
-                {
-                    "id": f.id,
-                    "fingerprint": f.fingerprint,
-                    "tool": f.tool,
-                    "title": f.title,
-                    "severity": f.severity,
-                    "asset": f.asset,
-                    "asset_id": f.asset_id,
-                    "exposure": f.exposure,
-                    "criticality": f.criticality,
-                    "status": f.status,
-                    "assignee": f.assignee,
-                    "risk_score": f.risk_score,
-                    "occurrences": f.occurrences,
-                    "first_seen": f.first_seen.isoformat() + "Z",
-                    "last_seen": f.last_seen.isoformat() + "Z",
-                    "signal_id": f.signal_id,
-                }
-                for f in rows
-            ],
+            "offset": offset,
+            "results": [_serialize_finding(f) for f in rows],
         }
     finally:
         db.close()
+
 
 # -----------------------------
 # Get single finding with comments
@@ -369,45 +399,32 @@ def get_finding(finding_id: str):
             select(Comment).where(Comment.finding_id == finding_id).order_by(Comment.created_at.desc())
         ).scalars().all()
 
-        return {
-            "id": finding.id,
-            "fingerprint": finding.fingerprint,
-            "tool": finding.tool,
-            "title": finding.title,
-            "severity": finding.severity,
-            "asset": finding.asset,
-            "asset_id": finding.asset_id,
-            "exposure": finding.exposure,
-            "criticality": finding.criticality,
-            "status": finding.status,
-            "assignee": finding.assignee,
-            "risk_score": finding.risk_score,
-            "occurrences": finding.occurrences,
-            "first_seen": finding.first_seen.isoformat() + "Z",
-            "last_seen": finding.last_seen.isoformat() + "Z",
-            "signal_id": finding.signal_id,
-            "comments": [
-                {
-                    "id": c.id,
-                    "author": c.author,
-                    "content": c.content,
-                    "action_type": c.action_type,
-                    "created_at": c.created_at.isoformat() + "Z",
-                }
-                for c in comments
-            ],
-        }
+        result = _serialize_finding(finding)
+        result["comments"] = [
+            {
+                "id": c.id,
+                "author": c.author,
+                "content": c.content,
+                "action_type": c.action_type,
+                "created_at": c.created_at.isoformat() + "Z",
+            }
+            for c in comments
+        ]
+        return result
     finally:
         db.close()
+
 
 # -----------------------------
 # Update finding (status, assignee)
 # -----------------------------
 ALLOWED_STATUSES = {"open", "investigating", "resolved", "closed"}
 
+
 class FindingUpdate(BaseModel):
     status: Optional[str] = None
     assignee: Optional[str] = None
+
 
 @app.patch("/findings/{finding_id}")
 def update_finding(finding_id: str, payload: FindingUpdate):
@@ -416,7 +433,7 @@ def update_finding(finding_id: str, payload: FindingUpdate):
         if payload.status is not None and payload.status not in ALLOWED_STATUSES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status '{payload.status}'. Allowed: {', '.join(sorted(ALLOWED_STATUSES))}"
+                detail=f"Invalid status '{payload.status}'. Allowed: {', '.join(sorted(ALLOWED_STATUSES))}",
             )
 
         finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
@@ -462,12 +479,14 @@ def update_finding(finding_id: str, payload: FindingUpdate):
     finally:
         db.close()
 
+
 # -----------------------------
 # Add comment to finding
 # -----------------------------
 class CommentIn(BaseModel):
     author: str = Field(..., examples=["john"])
     content: str = Field(..., examples=["Looking into this issue"])
+
 
 @app.post("/findings/{finding_id}/comments")
 def add_comment(finding_id: str, payload: CommentIn):
@@ -501,8 +520,9 @@ def add_comment(finding_id: str, payload: CommentIn):
     finally:
         db.close()
 
+
 # -----------------------------
-# Risks (simple aggregation by asset string)
+# Risks
 # -----------------------------
 @app.get("/risks")
 def list_risks():
@@ -537,9 +557,7 @@ def list_risks():
     finally:
         db.close()
 
-# -----------------------------
-# Risks by asset (join assets + findings)
-# -----------------------------
+
 @app.get("/risks/assets")
 def risks_by_asset(limit: int = 100):
     db: Session = SessionLocal()
@@ -559,9 +577,9 @@ def risks_by_asset(limit: int = 100):
             .limit(max(1, min(limit, 200)))
         ).all()
 
-        results = []
-        for r in rows:
-            results.append(
+        return {
+            "count": len(rows),
+            "results": [
                 {
                     "asset": r.asset,
                     "total_findings": int(r.total_findings or 0),
@@ -569,11 +587,12 @@ def risks_by_asset(limit: int = 100):
                     "risk_sum": int(r.risk_sum or 0),
                     "avg_risk": int(float(r.avg_risk or 0)),
                 }
-            )
-
-        return {"count": len(results), "results": results}
+                for r in rows
+            ],
+        }
     finally:
         db.close()
+
 
 # -----------------------------
 # Integrations status
@@ -598,17 +617,13 @@ def get_integrations_status():
         },
     }
 
-# -----------------------------
-# Test Slack notification
-# -----------------------------
+
 @app.post("/integrations/slack/test")
-async def test_slack():
-    from .notifications import send_slack_notification
-    
+def test_slack():
     if not os.environ.get("SLACK_WEBHOOK_URL"):
         raise HTTPException(status_code=400, detail="SLACK_WEBHOOK_URL not configured")
-    
-    result = await send_slack_notification(
+
+    result = send_slack_notification_sync(
         title="Test Notification",
         severity="info",
         asset="test-asset",
@@ -618,11 +633,12 @@ async def test_slack():
         is_new=True,
         occurrences=1,
     )
-    
+
     if result and result.get("ok"):
         return {"ok": True, "message": "Test notification sent successfully"}
     else:
         raise HTTPException(status_code=500, detail=f"Failed to send: {result}")
+
 
 # -----------------------------
 # Scanner Parsers
@@ -630,27 +646,37 @@ async def test_slack():
 @app.get("/parsers")
 def get_parsers(category: Optional[str] = None):
     all_parsers = list_parsers()
-    
+
     if category:
         try:
             cat = ScannerCategory(category.lower())
             all_parsers = [p for p in all_parsers if p["category"] == cat.value]
         except ValueError:
             pass
-    
-    by_category = {}
+
+    by_category: dict = {}
     for p in all_parsers:
         cat = p["category"]
         if cat not in by_category:
             by_category[cat] = []
         by_category[cat].append(p)
-    
+
     return {
         "count": len(all_parsers),
         "categories": list(by_category.keys()),
         "parsers": all_parsers,
         "by_category": by_category,
     }
+
+
+@app.get("/parsers/{parser_name}")
+def get_parser_info(parser_name: str):
+    parser = get_parser(parser_name)
+    if not parser:
+        raise HTTPException(status_code=404, detail=f"Parser '{parser_name}' not found")
+
+    return parser.get_info()
+
 
 # -----------------------------
 # Import scan results
@@ -662,6 +688,7 @@ class ScanImportRequest(BaseModel):
     default_asset: Optional[str] = Field(None, description="Default asset if not detected from scan")
     default_exposure: str = Field("internal", description="Default exposure level")
     default_criticality: str = Field("medium", description="Default criticality level")
+
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
@@ -675,7 +702,7 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse scan: {str(e)}")
-    
+
     if not parsed_findings:
         return {
             "ok": True,
@@ -684,17 +711,17 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
             "deduplicated": 0,
             "message": "No findings found in scan output",
         }
-    
+
     db: Session = SessionLocal()
     try:
         now = datetime.utcnow()
         imported = 0
         new_findings = 0
         deduplicated = 0
-        
+
         for pf in parsed_findings:
             asset_key = (pf.asset or payload.default_asset or "unknown").strip().lower()
-            
+
             asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
             if asset is None:
                 asset = Asset(
@@ -709,17 +736,17 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                 )
                 db.add(asset)
                 db.flush()
-            
+
             signal = Signal(tool=pf.tool, payload=json.dumps(pf.to_signal_payload()))
             db.add(signal)
             db.flush()
-            
+
             severity = pf.severity.value
             exposure = asset.exposure or payload.default_exposure
             criticality = asset.criticality or payload.default_criticality
             risk_score = compute_risk_score(severity, exposure, criticality)
             fp = make_fingerprint(pf.tool, pf.title, asset_key)
-            
+
             existing = db.execute(select(Finding).where(Finding.fingerprint == fp)).scalars().first()
             if existing:
                 existing.last_seen = now
@@ -728,7 +755,7 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                 existing.signal_id = signal.id
                 db.add(existing)
                 deduplicated += 1
-                
+
                 if severity in NOTIFY_SEVERITIES:
                     background_tasks.add_task(
                         run_notifications_sync,
@@ -757,10 +784,15 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                     first_seen=now,
                     last_seen=now,
                     signal_id=signal.id,
+                    description=pf.description or None,
+                    recommendation=pf.recommendation or None,
+                    cwe_id=pf.cwe_id,
+                    cve_id=pf.cve_id,
+                    cvss_score=pf.cvss_score,
                 )
                 db.add(finding)
                 new_findings += 1
-                
+
                 if severity in NOTIFY_SEVERITIES:
                     db.flush()
                     background_tasks.add_task(
@@ -774,11 +806,11 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                         is_new=True,
                         occurrences=1,
                     )
-            
+
             imported += 1
-        
+
         db.commit()
-        
+
         return {
             "ok": True,
             "imported": imported,
@@ -788,11 +820,3 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
         }
     finally:
         db.close()
-
-@app.get("/parsers/{parser_name}")
-def get_parser_info(parser_name: str):
-    parser = get_parser(parser_name)
-    if not parser:
-        raise HTTPException(status_code=404, detail=f"Parser '{parser_name}' not found")
-    
-    return parser.get_info()

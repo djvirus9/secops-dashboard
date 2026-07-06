@@ -2,8 +2,6 @@ import os
 import httpx
 from typing import Optional
 
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
-
 SEVERITY_EMOJI = {
     "critical": ":rotating_light:",
     "high": ":warning:",
@@ -37,7 +35,7 @@ def send_slack_notification_sync(
 
     emoji = SEVERITY_EMOJI.get(severity.lower(), ":question:")
     color = SEVERITY_COLOR.get(severity.lower(), "#6b7280")
-    
+
     action_text = "New finding detected" if is_new else f"Seen again (#{occurrences})"
 
     blocks = [
@@ -46,8 +44,8 @@ def send_slack_notification_sync(
             "text": {
                 "type": "plain_text",
                 "text": f"{emoji} {action_text}: {severity.upper()}",
-                "emoji": True
-            }
+                "emoji": True,
+            },
         },
         {
             "type": "section",
@@ -56,24 +54,17 @@ def send_slack_notification_sync(
                 {"type": "mrkdwn", "text": f"*Asset:*\n{asset}"},
                 {"type": "mrkdwn", "text": f"*Tool:*\n{tool}"},
                 {"type": "mrkdwn", "text": f"*Risk Score:*\n{risk_score}"},
-            ]
+            ],
         },
         {
             "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": f"Finding ID: `{finding_id}`"}
-            ]
-        }
+            "elements": [{"type": "mrkdwn", "text": f"Finding ID: `{finding_id}`"}],
+        },
     ]
 
     payload = {
         "text": f"{emoji} {severity.upper()}: {title} on {asset}",
-        "attachments": [
-            {
-                "color": color,
-                "blocks": blocks
-            }
-        ]
+        "attachments": [{"color": color, "blocks": blocks}],
     }
 
     try:
@@ -84,64 +75,5 @@ def send_slack_notification_sync(
         return {"ok": False, "error": str(e)}
 
 
-async def send_slack_notification(
-    title: str,
-    severity: str,
-    asset: str,
-    risk_score: int,
-    finding_id: str,
-    tool: str,
-    is_new: bool = True,
-    occurrences: int = 1,
-) -> Optional[dict]:
-    webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-    if not webhook_url:
-        return None
-
-    emoji = SEVERITY_EMOJI.get(severity.lower(), ":question:")
-    color = SEVERITY_COLOR.get(severity.lower(), "#6b7280")
-    
-    action_text = "New finding detected" if is_new else f"Seen again (#{occurrences})"
-
-    blocks = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"{emoji} {action_text}: {severity.upper()}",
-                "emoji": True
-            }
-        },
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*Title:*\n{title}"},
-                {"type": "mrkdwn", "text": f"*Asset:*\n{asset}"},
-                {"type": "mrkdwn", "text": f"*Tool:*\n{tool}"},
-                {"type": "mrkdwn", "text": f"*Risk Score:*\n{risk_score}"},
-            ]
-        },
-        {
-            "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": f"Finding ID: `{finding_id}`"}
-            ]
-        }
-    ]
-
-    payload = {
-        "text": f"{emoji} {severity.upper()}: {title} on {asset}",
-        "attachments": [
-            {
-                "color": color,
-                "blocks": blocks
-            }
-        ]
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(webhook_url, json=payload)
-            return {"ok": response.status_code == 200, "status": response.status_code}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+# Alias so existing imports of send_slack_notification still work
+send_slack_notification = send_slack_notification_sync
