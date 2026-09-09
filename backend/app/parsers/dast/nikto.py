@@ -18,7 +18,11 @@ class NiktoParser(BaseParser):
         try:
             if content.strip().startswith("{"):
                 data = json.loads(content)
-                return "vulnerabilities" in data or "host" in data
+                return (
+                    isinstance(data.get("vulnerabilities"), list)
+                    and "host" in data
+                    and ("port" in data or "banner" in data)
+                )
             elif content.strip().startswith("<"):
                 return "niktoscan" in content.lower()[:500]
             return False

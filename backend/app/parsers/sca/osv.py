@@ -16,7 +16,17 @@ class OSVParser(BaseParser):
     def can_parse(cls, content: str, filename: Optional[str] = None) -> bool:
         try:
             data = json.loads(content)
-            return "results" in data and isinstance(data["results"], list)
+            results = data.get("results")
+            return (
+                isinstance(results, list)
+                and bool(results)
+                and any(
+                    isinstance(result, dict)
+                    and "source" in result
+                    and "packages" in result
+                    for result in results[:5]
+                )
+            )
         except:
             return False
     

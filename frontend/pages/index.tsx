@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiGet, apiPost } from "../lib/api";
 
 type Health = { status: string };
+type Summary = {
+  total_findings: number;
+  active_findings: number;
+  resolved_findings: number;
+  critical_findings: number;
+  assets: number;
+  active_by_severity: Record<string, number>;
+};
+type SubmitResult = {
+  accepted: boolean;
+  deduped: boolean;
+  finding_id: string;
+  risk_score: number;
+  occurrences: number;
+};
 
 const API = {
   health: "/api/health",
-  ingest: "/api/ingest/signal",
-  findings: "/api/findings",
-  risks: "/api/risks",
 };
 
 export default function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthErr, setHealthErr] = useState<string | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
 
   const [tool, setTool] = useState("nuclei");
   const [severity, setSeverity] = useState("high");
@@ -20,7 +34,7 @@ export default function Dashboard() {
   const [exposure, setExposure] = useState("internet");
   const [criticality, setCriticality] = useState("high");
 
-  const [submitRes, setSubmitRes] = useState<any>(null);
+  const [submitRes, setSubmitRes] = useState<SubmitResult | null>(null);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -43,7 +57,14 @@ export default function Dashboard() {
       }
     };
     run();
+    loadSummary();
   }, []);
+
+  const loadSummary = () => {
+    apiGet<Summary>("/dashboard/summary")
+      .then(setSummary)
+      .catch((error) => setHealthErr(error instanceof Error ? error.message : "Failed to load summary"));
+  };
 
   const submit = async () => {
     try {
@@ -51,16 +72,11 @@ export default function Dashboard() {
       setSubmitErr(null);
       setSubmitRes(null);
 
-      const r = await fetch(API.ingest, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.detail || `HTTP ${r.status}`);
-      setSubmitRes(j);
-    } catch (e: any) {
-      setSubmitErr(e?.message || "Submit failed");
+      const result = await apiPost<SubmitResult>("/ingest/signal", payload);
+      setSubmitRes(result);
+      loadSummary();
+    } catch (error: unknown) {
+      setSubmitErr(error instanceof Error ? error.message : "Submit failed");
     } finally {
       setSubmitting(false);
     }
@@ -73,12 +89,12 @@ export default function Dashboard() {
         <p className="text-sm text-gray-600 dark:text-gray-400">Vulnerability management dashboard — ingest, triage, and track findings across your stack.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card title="API Status">
           {health ? (
             <div className="space-y-2">
               <div className="inline-flex rounded-full border dark:border-gray-600 px-2 py-1 text-sm text-gray-900 dark:text-white">✅ {health.status}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">via Next rewrites: /api → http://localhost:8000</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Authenticated server-side API proxy</div>
             </div>
           ) : (
             <div className="space-y-2">
@@ -89,24 +105,10 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
-
-        <Card title="Endpoints">
-          <ul className="space-y-1 text-sm text-gray-900 dark:text-gray-100">
-            <li className="font-mono">{API.health}</li>
-            <li className="font-mono">{API.ingest}</li>
-            <li className="font-mono">{API.findings}</li>
-            <li className="font-mono">{API.risks}</li>
-          </ul>
-        </Card>
-
-        <Card title="Quick Links">
-          <ul className="space-y-1 text-sm">
-            <li><a href="/findings" className="text-indigo-600 dark:text-indigo-400 hover:underline">Findings</a></li>
-            <li><a href="/assets" className="text-indigo-600 dark:text-indigo-400 hover:underline">Assets</a></li>
-            <li><a href="/risks" className="text-indigo-600 dark:text-indigo-400 hover:underline">Risk Register</a></li>
-            <li><a href="/integrations" className="text-indigo-600 dark:text-indigo-400 hover:underline">Integrations</a></li>
-          </ul>
-        </Card>
+        <MetricCard label="Active" value={summary?.active_findings} tone="text-orange-600 dark:text-orange-400" />
+        <MetricCard label="Critical" value={summary?.critical_findings} tone="text-red-600 dark:text-red-400" />
+        <MetricCard label="Resolved" value={summary?.resolved_findings} tone="text-green-600 dark:text-green-400" />
+        <MetricCard label="Assets" value={summary?.assets} tone="text-indigo-600 dark:text-indigo-400" />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -188,6 +190,14 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{title}</div>
       {children}
     </div>
+  );
+}
+
+function MetricCard({ label, value, tone }: { label: string; value?: number; tone: string }) {
+  return (
+    <Card title={label}>
+      <div className={`text-3xl font-bold ${tone}`}>{value ?? "—"}</div>
+    </Card>
   );
 }
 

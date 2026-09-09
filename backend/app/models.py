@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -11,6 +11,12 @@ from .db import Base
 
 def _uuid() -> str:
     return str(uuid4())
+
+
+def _utcnow() -> datetime:
+    # Database columns intentionally remain naive UTC for migration
+    # compatibility; avoid the deprecated datetime.utcnow().
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Asset(Base):
@@ -24,8 +30,8 @@ class Asset(Base):
     criticality: Mapped[str] = mapped_column(String, default="medium")
     exposure: Mapped[str] = mapped_column(String, default="internal")
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     findings: Mapped[list["Finding"]] = relationship(back_populates="asset_rel")
 
@@ -36,11 +42,12 @@ class Signal(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     tool: Mapped[str] = mapped_column(String, index=True)
     payload: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class Finding(Base):
     __tablename__ = "findings"
+    __table_args__ = (UniqueConstraint("fingerprint", name="uq_findings_fingerprint"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
 
@@ -67,9 +74,13 @@ class Finding(Base):
     cwe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cve_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    line_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    references_json: Mapped[str] = mapped_column(Text, default="[]")
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
 
-    first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     signal_id: Mapped[str] = mapped_column(String, index=True)
 
@@ -87,4 +98,4 @@ class Comment(Base):
     content: Mapped[str] = mapped_column(Text)
     action_type: Mapped[str | None] = mapped_column(String, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -32,7 +32,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+args = "cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 waitForPort = 8000
 
 [[workflows.workflow]]
@@ -59,11 +59,7 @@ externalPort = 3001
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 8000
-externalPort = 8000
-
 [deployment]
 deploymentTarget = "autoscale"
-run = ["bash", "-c", "cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 & cd frontend && npm run start"]
+run = ["bash", "-c", "cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 & cd frontend && npm run start"]
 build = ["bash", "-c", "cd frontend && npm run build"]

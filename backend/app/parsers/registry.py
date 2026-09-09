@@ -42,4 +42,4 @@ def parse_scan_results(
             raise ValueError("Could not auto-detect parser for this content")
         parser = parser_class()
     
-    return parser.parse(content, filename)
+    return ParserRegistry.parse(parser, content, filename)

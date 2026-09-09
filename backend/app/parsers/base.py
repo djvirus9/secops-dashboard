@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Type
 from enum import Enum
+from inspect import signature
 
 
 class ScannerCategory(str, Enum):
@@ -69,6 +70,9 @@ class ParsedFinding:
     cwe_id: Optional[int] = None
     cve_id: Optional[str] = None
     cvss_score: Optional[float] = None
+    # Compatibility aliases used by older parser implementations.
+    cwe: Optional[Any] = field(default=None, repr=False)
+    cve: Optional[str] = field(default=None, repr=False)
     
     recommendation: str = ""
     references: List[str] = field(default_factory=list)
@@ -76,9 +80,30 @@ class ParsedFinding:
     raw_data: Dict[str, Any] = field(default_factory=dict)
     
     detected_at: Optional[datetime] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.severity, Severity):
+            self.severity = Severity.normalize(str(self.severity))
+
+        if not self.cve_id and self.cve:
+            self.cve_id = str(self.cve)
+
+        if self.cwe_id is None and self.cwe not in (None, ""):
+            candidate = self.cwe[0] if isinstance(self.cwe, list) and self.cwe else self.cwe
+            try:
+                self.cwe_id = int(str(candidate).upper().replace("CWE-", "").split(":")[0])
+            except (TypeError, ValueError):
+                self.cwe_id = None
     
-    def to_signal_payload(self) -> Dict[str, Any]:
-        return {
+    def to_signal_payload(self, *, include_raw_data: bool = False) -> Dict[str, Any]:
+        """Return normalized evidence, omitting raw scanner output by default.
+
+        Raw results frequently contain credentials, secret matches, source-code
+        snippets, and other sensitive data. Operators can explicitly opt in to
+        storing them when their database controls and retention policy allow it.
+        """
+
+        payload = {
             "tool": self.tool,
             "title": self.title,
             "severity": self.severity.value,
@@ -92,8 +117,10 @@ class ParsedFinding:
             "recommendation": self.recommendation,
             "references": self.references,
             "tags": self.tags,
-            "raw_data": self.raw_data,
         }
+        if include_raw_data:
+            payload["raw_data"] = self.raw_data
+        return payload
 
 
 class BaseParser(ABC):
@@ -102,6 +129,7 @@ class BaseParser(ABC):
     category: ScannerCategory = ScannerCategory.GENERIC
     file_types: List[str] = ["json"]
     description: str = "Base parser class"
+    auto_detectable: bool = True
     
     @abstractmethod
     def parse(self, content: str, filename: Optional[str] = None) -> List[ParsedFinding]:
@@ -132,25 +160,80 @@ class ParserRegistry:
     @classmethod
     def get(cls, name: str) -> Optional[Type[BaseParser]]:
         return cls._parsers.get(name)
+
+    @staticmethod
+    def _can_parse(
+        parser_class: Type[BaseParser], content: str, filename: Optional[str] = None
+    ) -> bool:
+        method = parser_class().can_parse
+        if len(signature(method).parameters) == 1:
+            return bool(method(content))
+        return bool(method(content, filename))
+
+    @staticmethod
+    def parse(
+        parser: BaseParser, content: str, filename: Optional[str] = None
+    ) -> List[ParsedFinding]:
+        method = parser.parse
+        if len(signature(method).parameters) == 1:
+            return method(content)
+        return method(content, filename)
+
+    @classmethod
+    def is_auto_detectable(cls, parser_class: Type[BaseParser]) -> bool:
+        if not parser_class.auto_detectable:
+            return False
+
+        # Several compatibility parsers intentionally accept arbitrary JSON.
+        # They are useful when selected explicitly, but cannot safely
+        # participate in auto-detection because they shadow specific parsers.
+        try:
+            catches_any_object = cls._can_parse(parser_class, "{}") and cls._can_parse(
+                parser_class, '{"_secops_probe": true}'
+            )
+            catches_any_array = cls._can_parse(parser_class, "[]") and cls._can_parse(
+                parser_class, '[{"_secops_probe": true}]'
+            )
+            catches_any_json = catches_any_object or catches_any_array
+        except Exception:
+            catches_any_json = False
+        return not catches_any_json
     
     @classmethod
     def list_all(cls) -> List[Dict[str, Any]]:
-        return [p().get_info() for p in cls._parsers.values()]
+        results = []
+        for parser_class in cls._parsers.values():
+            info = parser_class().get_info()
+            info["auto_detectable"] = cls.is_auto_detectable(parser_class)
+            results.append(info)
+        return results
     
     @classmethod
     def list_by_category(cls, category: ScannerCategory) -> List[Dict[str, Any]]:
-        return [
-            p().get_info() 
-            for p in cls._parsers.values() 
-            if p.category == category
-        ]
+        results = []
+        for parser_class in cls._parsers.values():
+            if parser_class.category != category:
+                continue
+            info = parser_class().get_info()
+            info["auto_detectable"] = cls.is_auto_detectable(parser_class)
+            results.append(info)
+        return results
     
     @classmethod
     def auto_detect(cls, content: str, filename: Optional[str] = None) -> Optional[Type[BaseParser]]:
+        matches = []
         for parser_class in cls._parsers.values():
+            if not cls.is_auto_detectable(parser_class):
+                continue
             try:
-                if parser_class.can_parse(content, filename):
-                    return parser_class
+                if cls._can_parse(parser_class, content, filename):
+                    matches.append(parser_class)
             except Exception:
                 continue
-        return None
+
+        if len(matches) > 1:
+            names = ", ".join(parser.name for parser in matches)
+            raise ValueError(
+                f"Ambiguous scan format; select a parser explicitly. Matches: {names}"
+            )
+        return matches[0] if matches else None

@@ -19,6 +19,7 @@ type Parser = {
   category: string;
   file_types: string[];
   description: string;
+  auto_detectable: boolean;
 };
 
 type ParsersResponse = {
@@ -336,6 +337,11 @@ export default function Integrations() {
                       .{ft}
                     </span>
                   ))}
+                  {!parser.auto_detectable && (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                      manual selection
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -363,7 +369,9 @@ export default function Integrations() {
                   >
                     <option value="">Auto-detect</option>
                     {parsers?.parsers.map(p => (
-                      <option key={p.name} value={p.name}>{p.display_name} ({p.category})</option>
+                      <option key={p.name} value={p.name}>
+                        {p.display_name} ({p.category}){p.auto_detectable ? "" : " — manual only"}
+                      </option>
                     ))}
                   </select>
                 </div>

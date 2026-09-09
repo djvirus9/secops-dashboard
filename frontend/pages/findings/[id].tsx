@@ -25,6 +25,15 @@ type Finding = {
   assignee: string | null;
   risk_score: number;
   occurrences: number;
+  description: string | null;
+  recommendation: string | null;
+  cwe_id: number | null;
+  cve_id: string | null;
+  cvss_score: number | null;
+  file_path: string | null;
+  line_number: number | null;
+  references: string[];
+  tags: string[];
   first_seen: string;
   last_seen: string;
   signal_id: string;
@@ -47,6 +56,15 @@ const STATUS_COLORS: Record<string, string> = {
   resolved: "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
   closed: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
 };
+
+function safeReference(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function FindingDetailPage() {
   const router = useRouter();
@@ -186,6 +204,62 @@ export default function FindingDetailPage() {
             <div className="text-gray-900 dark:text-white text-sm">{new Date(finding.last_seen).toLocaleString()}</div>
           </div>
         </div>
+
+        {(finding.file_path || finding.cve_id || finding.cwe_id || finding.cvss_score) && (
+          <div className="grid grid-cols-1 gap-4 border-t pt-4 dark:border-gray-700 md:grid-cols-4">
+            {finding.file_path && (
+              <div className="md:col-span-2">
+                <div className="text-xs uppercase text-gray-500 dark:text-gray-400">Location</div>
+                <div className="break-all font-mono text-sm text-gray-900 dark:text-white">
+                  {finding.file_path}{finding.line_number ? `:${finding.line_number}` : ""}
+                </div>
+              </div>
+            )}
+            {finding.cve_id && <Detail label="CVE" value={finding.cve_id} />}
+            {finding.cwe_id && <Detail label="CWE" value={`CWE-${finding.cwe_id}`} />}
+            {finding.cvss_score !== null && <Detail label="CVSS" value={finding.cvss_score} />}
+          </div>
+        )}
+
+        {finding.description && (
+          <div className="border-t pt-4 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Description</h2>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{finding.description}</p>
+          </div>
+        )}
+
+        {finding.recommendation && (
+          <div className="border-t pt-4 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Recommendation</h2>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{finding.recommendation}</p>
+          </div>
+        )}
+
+        {finding.tags.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-t pt-4 dark:border-gray-700">
+            {finding.tags.map((tag) => (
+              <span key={tag} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {finding.references.length > 0 && (
+          <div className="border-t pt-4 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">References</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+              {finding.references.map((reference) => {
+                const href = safeReference(reference);
+                return (
+                  <li key={reference} className="break-all text-gray-700 dark:text-gray-300">
+                    {href ? <a href={href} rel="noopener noreferrer" target="_blank" className="text-indigo-600 hover:underline dark:text-indigo-400">{reference}</a> : reference}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
@@ -282,6 +356,15 @@ export default function FindingDetailPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <div className="text-xs uppercase text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-sm text-gray-900 dark:text-white">{value}</div>
     </div>
   );
 }

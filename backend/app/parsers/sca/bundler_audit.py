@@ -15,7 +15,18 @@ class BundlerAuditParser(BaseParser):
             return True
         try:
             data = json.loads(content)
-            return "results" in data or "vulnerabilities" in data
+            if not isinstance(data, dict):
+                return False
+            items = data.get("results", data.get("vulnerabilities"))
+            return (
+                isinstance(items, list)
+                and bool(items)
+                and any(
+                    isinstance(item, dict)
+                    and ("gem" in item or "advisory" in item)
+                    for item in items[:5]
+                )
+            )
         except:
             return False
 

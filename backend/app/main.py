@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
+from typing import Literal, Optional
 import json
 import hashlib
 import logging
@@ -9,12 +9,13 @@ import os
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .auth import api_key_middleware
-from .db import engine, SessionLocal, Base
+from .db import SessionLocal
 from .models import Signal, Finding, Asset, Comment
 from .notifications import send_slack_notification_sync, create_jira_issue_sync
 from .parsers import list_parsers, parse_scan_results, get_parser
@@ -22,19 +23,48 @@ from .parsers.base import ScannerCategory
 
 logger = logging.getLogger(__name__)
 
+
+def utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
 app = FastAPI(title="SecOps Dashboard API", version="0.8.0")
 
 app.middleware("http")(api_key_middleware)
 
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5000"
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:5000").split(","),
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
+allowed_hosts = [
+    host.strip()
+    for host in os.environ.get(
+        "ALLOWED_HOSTS", "localhost,127.0.0.1,backend,testserver"
+    ).split(",")
+    if host.strip()
+]
+if not allowed_hosts:
+    allowed_hosts = ["localhost", "127.0.0.1", "backend", "testserver"]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
 NOTIFY_SEVERITIES = {"critical", "high"}
+STORE_RAW_SCAN_DATA = os.environ.get("STORE_RAW_SCAN_DATA", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 SEVERITY_WEIGHT = {
     "info": 1,
@@ -63,9 +93,54 @@ def compute_risk_score(severity: str, exposure: str, criticality: str) -> int:
     return max(1, min(int(round(s * e * c * 10)), 200))
 
 
-def make_fingerprint(tool: str, title: str, asset_key: str) -> str:
-    raw = f"{(tool or '').strip().lower()}|{(title or '').strip().lower()}|{(asset_key or '').strip().lower()}"
+def make_fingerprint(
+    tool: str,
+    title: str,
+    asset_key: str,
+    *,
+    source_id: Optional[str] = None,
+    file_path: Optional[str] = None,
+    line_number: Optional[int] = None,
+    cve_id: Optional[str] = None,
+) -> str:
+    """Create a scanner-aware fingerprint that keeps distinct locations apart."""
+
+    if not any((source_id, file_path, line_number, cve_id)):
+        # Preserve fingerprints already produced by the original signal API.
+        parts = [tool, title, asset_key]
+    else:
+        identity = source_id or cve_id or title
+        parts = [tool, identity, asset_key, file_path or "", str(line_number or "")]
+    raw = "|".join((part or "").strip().lower() for part in parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _source_identifier(raw_data: dict) -> Optional[str]:
+    keys = {
+        "id",
+        "rule_id",
+        "ruleid",
+        "check_id",
+        "checkid",
+        "template-id",
+        "templateid",
+        "plugin_id",
+        "pluginid",
+        "vulnerabilityid",
+        "testid",
+    }
+    for key, value in raw_data.items():
+        if key.lower() in keys and value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _json_list(value: Optional[str]) -> list:
+    try:
+        parsed = json.loads(value or "[]")
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        return []
 
 
 def _serialize_finding(f: Finding) -> dict:
@@ -88,6 +163,10 @@ def _serialize_finding(f: Finding) -> dict:
         "cwe_id": f.cwe_id,
         "cve_id": f.cve_id,
         "cvss_score": f.cvss_score,
+        "file_path": f.file_path,
+        "line_number": f.line_number,
+        "references": _json_list(f.references_json),
+        "tags": _json_list(f.tags_json),
         "first_seen": f.first_seen.isoformat() + "Z",
         "last_seen": f.last_seen.isoformat() + "Z",
         "signal_id": f.signal_id,
@@ -97,21 +176,22 @@ def _serialize_finding(f: Finding) -> dict:
 # -----------------------------
 # Schemas
 # -----------------------------
-class SignalIn(BaseModel):
-    tool: str = Field(..., examples=["nuclei"])
-    severity: str = Field(..., examples=["high"])
-    title: str = Field(..., examples=["Open redirect"])
-    asset: Optional[str] = Field(None, examples=["api.prod.example.com"])
-    exposure: str = Field("internal", examples=["internet"])
-    criticality: str = Field("medium", examples=["high"])
+class StrictModel(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
 
-# -----------------------------
-# Startup
-# -----------------------------
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
+SeverityValue = Literal["critical", "high", "medium", "low", "info"]
+ExposureValue = Literal["internal", "internet"]
+CriticalityValue = Literal["low", "medium", "high"]
+
+
+class SignalIn(StrictModel):
+    tool: str = Field(..., min_length=1, max_length=100, examples=["nuclei"])
+    severity: SeverityValue = Field(..., examples=["high"])
+    title: str = Field(..., min_length=1, max_length=500, examples=["Open redirect"])
+    asset: Optional[str] = Field(None, max_length=500, examples=["api.prod.example.com"])
+    exposure: ExposureValue = Field("internal", examples=["internet"])
+    criticality: CriticalityValue = Field("medium", examples=["high"])
 
 
 # -----------------------------
@@ -120,6 +200,57 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    db: Session = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception as exc:
+        logger.error("Database readiness check failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database is unavailable") from exc
+    finally:
+        db.close()
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary():
+    active_statuses = ["open", "investigating"]
+    db: Session = SessionLocal()
+    try:
+        total_findings = db.scalar(select(func.count()).select_from(Finding)) or 0
+        active_findings = db.scalar(
+            select(func.count()).select_from(Finding).where(Finding.status.in_(active_statuses))
+        ) or 0
+        critical_findings = db.scalar(
+            select(func.count())
+            .select_from(Finding)
+            .where(
+                Finding.status.in_(active_statuses),
+                Finding.severity == "critical",
+            )
+        ) or 0
+        asset_count = db.scalar(select(func.count()).select_from(Asset)) or 0
+        severity_rows = db.execute(
+            select(Finding.severity, func.count(Finding.id))
+            .where(Finding.status.in_(active_statuses))
+            .group_by(Finding.severity)
+        ).all()
+
+        return {
+            "total_findings": int(total_findings),
+            "active_findings": int(active_findings),
+            "resolved_findings": int(total_findings - active_findings),
+            "critical_findings": int(critical_findings),
+            "assets": int(asset_count),
+            "active_by_severity": {
+                severity: int(count) for severity, count in severity_rows
+            },
+        }
+    finally:
+        db.close()
 
 
 # -----------------------------
@@ -134,9 +265,11 @@ def list_assets(limit: int = 100, offset: int = 0):
         rows = db.execute(
             select(Asset).order_by(Asset.updated_at.desc()).offset(offset).limit(limit)
         ).scalars().all()
+        total = db.scalar(select(func.count()).select_from(Asset)) or 0
 
         return {
-            "count": len(rows),
+            "count": int(total),
+            "page_count": len(rows),
             "offset": offset,
             "results": [
                 {
@@ -157,35 +290,42 @@ def list_assets(limit: int = 100, offset: int = 0):
         db.close()
 
 
+class AssetUpsert(StrictModel):
+    key: str = Field(..., min_length=1, max_length=500)
+    name: Optional[str] = Field(None, max_length=500)
+    environment: Optional[str] = Field(None, max_length=100)
+    owner: Optional[str] = Field(None, max_length=255)
+    criticality: Optional[CriticalityValue] = None
+    exposure: Optional[ExposureValue] = None
+
+
 @app.post("/assets/upsert")
-def upsert_asset(payload: dict):
-    key = (payload.get("key") or "").strip().lower()
-    if not key:
-        raise HTTPException(status_code=400, detail="key is required")
+def upsert_asset(payload: AssetUpsert):
+    key = payload.key.lower()
 
     db: Session = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = utcnow()
         a = db.execute(select(Asset).where(Asset.key == key)).scalar_one_or_none()
 
         if a is None:
             a = Asset(
                 key=key,
-                name=payload.get("name") or key,
-                environment=payload.get("environment") or "unknown",
-                owner=payload.get("owner") or "",
-                criticality=(payload.get("criticality") or "medium"),
-                exposure=(payload.get("exposure") or "internal"),
+                name=payload.name or key,
+                environment=payload.environment or "unknown",
+                owner=payload.owner or "",
+                criticality=payload.criticality or "medium",
+                exposure=payload.exposure or "internal",
                 created_at=now,
                 updated_at=now,
             )
             db.add(a)
         else:
-            a.name = payload.get("name") or a.name
-            a.environment = payload.get("environment") or a.environment
-            a.owner = payload.get("owner") or a.owner
-            a.criticality = payload.get("criticality") or a.criticality
-            a.exposure = payload.get("exposure") or a.exposure
+            a.name = payload.name or a.name
+            a.environment = payload.environment or a.environment
+            a.owner = payload.owner or a.owner
+            a.criticality = payload.criticality or a.criticality
+            a.exposure = payload.exposure or a.exposure
             a.updated_at = now
 
         db.commit()
@@ -257,7 +397,7 @@ def run_notifications_sync(
 def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
     db: Session = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = utcnow()
         asset_key = (payload.asset or "unknown").strip().lower()
 
         asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
@@ -290,6 +430,20 @@ def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
             existing.signal_id = signal.id
             existing.asset = asset_key
             existing.asset_id = asset.id
+            existing.severity = payload.severity
+            existing.exposure = payload.exposure
+            existing.criticality = payload.criticality
+            if existing.status in {"resolved", "closed"}:
+                existing.status = "open"
+                db.add(
+                    Comment(
+                        finding_id=existing.id,
+                        author="system",
+                        content="Finding resurfaced in a later signal and was reopened",
+                        action_type="reopened",
+                        created_at=now,
+                    )
+                )
             db.add(existing)
             db.commit()
 
@@ -374,9 +528,11 @@ def list_findings(limit: int = 100, offset: int = 0):
         rows = db.execute(
             select(Finding).order_by(Finding.last_seen.desc()).offset(offset).limit(limit)
         ).scalars().all()
+        total = db.scalar(select(func.count()).select_from(Finding)) or 0
 
         return {
-            "count": len(rows),
+            "count": int(total),
+            "page_count": len(rows),
             "offset": offset,
             "results": [_serialize_finding(f) for f in rows],
         }
@@ -418,29 +574,20 @@ def get_finding(finding_id: str):
 # -----------------------------
 # Update finding (status, assignee)
 # -----------------------------
-ALLOWED_STATUSES = {"open", "investigating", "resolved", "closed"}
-
-
-class FindingUpdate(BaseModel):
-    status: Optional[str] = None
-    assignee: Optional[str] = None
+class FindingUpdate(StrictModel):
+    status: Optional[Literal["open", "investigating", "resolved", "closed"]] = None
+    assignee: Optional[str] = Field(None, max_length=255)
 
 
 @app.patch("/findings/{finding_id}")
 def update_finding(finding_id: str, payload: FindingUpdate):
     db: Session = SessionLocal()
     try:
-        if payload.status is not None and payload.status not in ALLOWED_STATUSES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid status '{payload.status}'. Allowed: {', '.join(sorted(ALLOWED_STATUSES))}",
-            )
-
         finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
 
-        now = datetime.utcnow()
+        now = utcnow()
         changes = []
 
         if payload.status is not None and payload.status != finding.status:
@@ -483,9 +630,9 @@ def update_finding(finding_id: str, payload: FindingUpdate):
 # -----------------------------
 # Add comment to finding
 # -----------------------------
-class CommentIn(BaseModel):
-    author: str = Field(..., examples=["john"])
-    content: str = Field(..., examples=["Looking into this issue"])
+class CommentIn(StrictModel):
+    author: str = Field(..., min_length=1, max_length=255, examples=["john"])
+    content: str = Field(..., min_length=1, max_length=10_000, examples=["Looking into this issue"])
 
 
 @app.post("/findings/{finding_id}/comments")
@@ -501,7 +648,7 @@ def add_comment(finding_id: str, payload: CommentIn):
             author=payload.author,
             content=payload.content,
             action_type="comment",
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )
         db.add(comment)
         db.commit()
@@ -536,7 +683,7 @@ def list_risks():
                 func.sum(Finding.risk_score).label("risk_sum"),
                 func.avg(Finding.risk_score).label("avg_risk"),
             )
-            .where(Finding.status == "open")
+            .where(Finding.status.in_(["open", "investigating"]))
             .group_by(Finding.asset)
             .order_by(func.max(Finding.risk_score).desc())
         ).all()
@@ -571,9 +718,9 @@ def risks_by_asset(limit: int = 100):
                 func.avg(Finding.risk_score).label("avg_risk"),
             )
             .join(Finding, Finding.asset_id == Asset.id)
-            .where(Finding.status == "open")
+            .where(Finding.status.in_(["open", "investigating"]))
             .group_by(Asset.key)
-            .order_by(func.max(Finding.risk_score).desc())
+            .order_by(func.max(Finding.risk_score).desc(), func.count(Finding.id).desc())
             .limit(max(1, min(limit, 200)))
         ).all()
 
@@ -651,8 +798,12 @@ def get_parsers(category: Optional[str] = None):
         try:
             cat = ScannerCategory(category.lower())
             all_parsers = [p for p in all_parsers if p["category"] == cat.value]
-        except ValueError:
-            pass
+        except ValueError as exc:
+            allowed = ", ".join(category.value for category in ScannerCategory)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown parser category. Allowed: {allowed}",
+            ) from exc
 
     by_category: dict = {}
     for p in all_parsers:
@@ -681,17 +832,25 @@ def get_parser_info(parser_name: str):
 # -----------------------------
 # Import scan results
 # -----------------------------
-class ScanImportRequest(BaseModel):
-    content: str = Field(..., description="Raw scan output content (JSON, XML, CSV, etc.)")
-    parser: Optional[str] = Field(None, description="Parser name (auto-detect if not specified)")
-    filename: Optional[str] = Field(None, description="Original filename to help with detection")
-    default_asset: Optional[str] = Field(None, description="Default asset if not detected from scan")
-    default_exposure: str = Field("internal", description="Default exposure level")
-    default_criticality: str = Field("medium", description="Default criticality level")
+class ScanImportRequest(StrictModel):
+    content: str = Field(..., min_length=1, description="Raw scan output content (JSON, XML, CSV, etc.)")
+    parser: Optional[str] = Field(None, max_length=100, description="Parser name (auto-detect if not specified)")
+    filename: Optional[str] = Field(None, max_length=500, description="Original filename to help with detection")
+    default_asset: Optional[str] = Field(None, max_length=500, description="Default asset if not detected from scan")
+    default_exposure: ExposureValue = Field("internal", description="Default exposure level")
+    default_criticality: CriticalityValue = Field("medium", description="Default criticality level")
 
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
+    max_scan_bytes = int(os.environ.get("MAX_SCAN_BYTES", str(10 * 1024 * 1024)))
+    content_size = len(payload.content.encode("utf-8"))
+    if content_size > max_scan_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Scan payload exceeds the {max_scan_bytes}-byte limit",
+        )
+
     try:
         parsed_findings = parse_scan_results(
             content=payload.content,
@@ -714,7 +873,7 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
 
     db: Session = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = utcnow()
         imported = 0
         new_findings = 0
         deduplicated = 0
@@ -737,7 +896,12 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                 db.add(asset)
                 db.flush()
 
-            signal = Signal(tool=pf.tool, payload=json.dumps(pf.to_signal_payload()))
+            signal = Signal(
+                tool=pf.tool,
+                payload=json.dumps(
+                    pf.to_signal_payload(include_raw_data=STORE_RAW_SCAN_DATA)
+                ),
+            )
             db.add(signal)
             db.flush()
 
@@ -745,7 +909,15 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
             exposure = asset.exposure or payload.default_exposure
             criticality = asset.criticality or payload.default_criticality
             risk_score = compute_risk_score(severity, exposure, criticality)
-            fp = make_fingerprint(pf.tool, pf.title, asset_key)
+            fp = make_fingerprint(
+                pf.tool,
+                pf.title,
+                asset_key,
+                source_id=_source_identifier(pf.raw_data),
+                file_path=pf.file_path,
+                line_number=pf.line_number,
+                cve_id=pf.cve_id,
+            )
 
             existing = db.execute(select(Finding).where(Finding.fingerprint == fp)).scalars().first()
             if existing:
@@ -753,6 +925,29 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                 existing.occurrences = (existing.occurrences or 1) + 1
                 existing.risk_score = max(existing.risk_score or 0, risk_score)
                 existing.signal_id = signal.id
+                existing.severity = severity
+                existing.exposure = exposure
+                existing.criticality = criticality
+                existing.description = pf.description or existing.description
+                existing.recommendation = pf.recommendation or existing.recommendation
+                existing.cwe_id = pf.cwe_id or existing.cwe_id
+                existing.cve_id = pf.cve_id or existing.cve_id
+                existing.cvss_score = pf.cvss_score or existing.cvss_score
+                existing.file_path = pf.file_path or existing.file_path
+                existing.line_number = pf.line_number or existing.line_number
+                existing.references_json = json.dumps(pf.references or [])
+                existing.tags_json = json.dumps(pf.tags or [])
+                if existing.status in {"resolved", "closed"}:
+                    existing.status = "open"
+                    db.add(
+                        Comment(
+                            finding_id=existing.id,
+                            author="system",
+                            content="Finding resurfaced in a later scan and was reopened",
+                            action_type="reopened",
+                            created_at=now,
+                        )
+                    )
                 db.add(existing)
                 deduplicated += 1
 
@@ -789,6 +984,10 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                     cwe_id=pf.cwe_id,
                     cve_id=pf.cve_id,
                     cvss_score=pf.cvss_score,
+                    file_path=pf.file_path,
+                    line_number=pf.line_number,
+                    references_json=json.dumps(pf.references or []),
+                    tags_json=json.dumps(pf.tags or []),
                 )
                 db.add(finding)
                 new_findings += 1
