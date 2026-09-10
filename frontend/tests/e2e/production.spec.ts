@@ -170,13 +170,16 @@ test('dashboard styling preserves borders, focus indicators and the saved theme'
   await expect(card).toHaveCSS('box-shadow', /0px 1px 2px/);
   await expect(toggle).toHaveCSS('cursor', 'pointer');
 
+  const buttonPosition = await toggle.boundingBox();
   await page.keyboard.press('Tab');
   const skip = page.getByRole('link', { name: 'Skip to content' });
   await expect(skip).toBeFocused();
+  expect(await toggle.boundingBox()).toEqual(buttonPosition);
   await expect(skip).toHaveCSS('outline-width', '2px');
   await expect(skip).toHaveCSS('outline-offset', '2px');
 
   await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('body')).toHaveCSS('background-color', colors['900']);
   await expect(page.locator('header')).toHaveCSS('border-bottom-color', colors['700']);
   await page.reload();

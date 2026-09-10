@@ -34,7 +34,7 @@ export default function App({ Component, pageProps, router }: AppProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:block focus:p-3">Skip to content</a>
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="border-b bg-white dark:bg-gray-800 dark:border-gray-700">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex flex-col items-start gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="font-semibold text-gray-900 dark:text-white">SecOps Dashboard</div>
