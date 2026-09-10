@@ -5,6 +5,53 @@ security findings. FastAPI and PostgreSQL provide the API and persistence;
 Next.js provides the dashboard. A separate worker delivers durable Slack and
 Jira notification jobs.
 
+The source is public on GitHub under the [MIT License](LICENSE). Run your own
+instance to use the dashboard; this repository does not provide a shared hosted
+service. Local credentials, scan data, and database files stay in your checkout
+and are excluded from Git.
+
+![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
+
+## Try it locally
+
+Install Python 3.12+ and Node.js 24+ (24 LTS recommended), then use macOS, Linux,
+or Windows with WSL2. Docker and PostgreSQL are not needed for this quickstart.
+The first start downloads dependencies and builds the dashboard, so allow a few
+minutes and an internet connection to the package registries.
+
+```bash
+git clone https://github.com/djvirus9/secops-dashboard.git
+cd secops-dashboard
+python3 scripts/local.py start
+python3 scripts/local.py credentials
+python3 scripts/local.py seed  # optional synthetic findings in project "demo"
+```
+
+Open <http://127.0.0.1:5050> and sign in with the generated credentials shown by
+`credentials` in your terminal. That command avoids printing credentials when
+its output is redirected. The API listens on <http://127.0.0.1:8000>; both services
+bind only to your computer. If a port is occupied, use
+`python3 scripts/local.py start --port 5051 --api-port 8001`.
+
+The helper creates `.venv`, installs dependencies, builds the production frontend,
+and applies database migrations. Later starts reuse unchanged dependencies and
+builds. Local settings, logs, and process state live in the Git-ignored `.local/`
+directory; `.local/secops.db` stores your findings and `.local/env.json` stores
+generated credentials with owner-only permissions. The helper disables external
+Slack/Jira integrations and uses its own settings instead of a production `.env`.
+
+```bash
+python3 scripts/local.py status
+python3 scripts/local.py stop
+```
+
+Stopping preserves your data and credentials. Starting again restores the same
+instance. Seeding again skips import when the demo project already has findings.
+Keep `.local/`, `.env`, and database files private; review attachments and diffs
+before posting them to GitHub. For code changes and tests, see
+[CONTRIBUTING.md](CONTRIBUTING.md). For PostgreSQL or a server installation,
+continue with Docker Compose below.
+
 ## Supported deployment
 
 This release is intended for **one trusted security team** on a single deployment.
@@ -20,8 +67,9 @@ can read and modify all projects. Keep scanner credentials out of browsers.
 
 Mutating browser requests must match an exact canonical origin in
 `DASHBOARD_ORIGINS`; request `Host` and forwarding headers do not establish trust.
-The default `http://localhost:5000` is for local use. Public deployments must set
-their own HTTPS origin explicitly.
+The Compose/manual default `http://localhost:5000` is for local use; the quickstart
+helper configures its own loopback origin on port 5050. Public deployments must
+set their own HTTPS origin explicitly.
 
 ## Run with Docker Compose
 
@@ -83,10 +131,12 @@ runs as interrupted even if the worker is unavailable. The worker persists that
 interrupted state when it next polls. Split slow reports and submit them again;
 an import deadline does not forcibly terminate a running parser process.
 
-## Local development
+## Manual development setup
 
 Use Python 3.12+ and Node.js 24 LTS. SQLite is supported for local development;
-PostgreSQL is the production and CI database.
+PostgreSQL is the production and CI database. Use this setup for live code
+reloading; stop the quickstart helper before reusing its API port or frontend
+build directory. See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 
 The tracked `.replit` file is a legacy template with unmaintained runtime settings.
 That development/deployment route is unsupported for this release; use the local
@@ -152,3 +202,10 @@ with dependency audits, CodeQL, production browser tests, and Docker builds.
 See [.env.example](.env.example) for configuration and the
 [operations runbook](docs/operations.md) for TLS, backup/restore, upgrades,
 credential rotation, notification recovery, and release verification.
+
+## Contributing, security, and license
+
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report vulnerabilities privately through the process in [SECURITY.md](SECURITY.md).
+This project is available under the [MIT License](LICENSE); dependencies retain
+their own licenses.
