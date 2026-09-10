@@ -1,0 +1,111 @@
+{
+  "findings": [
+    {
+      "source_id": "DEMO-001",
+      "title": "[Demo] Administrative route lacks an access check",
+      "severity": "critical",
+      "asset": "api.example.invalid",
+      "file_path": "services/api/routes/admin.py",
+      "line_number": 42,
+      "component": "demo-admin-api",
+      "component_version": "1.0.0",
+      "cwe_id": 862,
+      "cvss_score": 9.8,
+      "description": "Synthetic example: an administrative route is modeled without an authorization check. Use this record to explore critical finding triage and ownership; no real service was scanned.",
+      "recommendation": "For this example, require an authenticated administrator before processing the route and add tests for anonymous and non-administrator requests."
+    },
+    {
+      "source_id": "DEMO-002",
+      "title": "[Demo] Search query uses untrusted text directly",
+      "severity": "high",
+      "asset": "api.example.invalid",
+      "file_path": "services/api/search.py",
+      "line_number": 87,
+      "component": "demo-search-api",
+      "component_version": "1.2.0",
+      "cwe_id": 89,
+      "cvss_score": 8.1,
+      "description": "Synthetic example: a search query is modeled as combining request text with database query syntax. This illustrates a high-priority application finding with a source location.",
+      "recommendation": "Use parameterized queries for values, validate any selectable sort fields against an allowlist, and test unusual search input."
+    },
+    {
+      "source_id": "DEMO-003",
+      "title": "[Demo] Worker runs with unnecessary privileges",
+      "severity": "high",
+      "asset": "worker.example.invalid",
+      "file_path": "deploy/worker/deployment.yaml",
+      "line_number": 31,
+      "component": "demo-report-worker",
+      "component_version": "2.0.0",
+      "cwe_id": 250,
+      "cvss_score": 7.5,
+      "description": "Synthetic example: a background worker is modeled with broader operating-system privileges than its job requires. No container or cluster was inspected.",
+      "recommendation": "Run the worker as a dedicated non-root user, remove unnecessary capabilities, and verify that its normal tasks still succeed."
+    },
+    {
+      "source_id": "DEMO-004",
+      "title": "[Demo] Account page renders an unescaped display name",
+      "severity": "medium",
+      "asset": "portal.example.invalid",
+      "file_path": "portal/components/account-card.tsx",
+      "line_number": 24,
+      "component": "demo-account-portal",
+      "component_version": "3.1.0",
+      "cwe_id": 79,
+      "cvss_score": 6.1,
+      "description": "Synthetic example: a profile display name is modeled as being inserted into markup without the usual output escaping. The report contains no executable payload.",
+      "recommendation": "Render the display name as ordinary text. If rich text is required, sanitize it with a maintained library and test the allowed formatting."
+    },
+    {
+      "source_id": "DEMO-005",
+      "title": "[Demo] Dependency update is awaiting verification",
+      "severity": "medium",
+      "asset": "worker.example.invalid",
+      "file_path": "services/worker/requirements.lock",
+      "line_number": 18,
+      "component": "demo-document-library",
+      "component_version": "0.8.0",
+      "cvss_score": 5.3,
+      "description": "Synthetic example: a fictional dependency has a pending maintenance update. The component name, version, and assessment are invented; this is not an advisory for a real package.",
+      "recommendation": "For the demo workflow, assign an owner to evaluate the fictional update, run document-processing tests, and record the outcome in a finding comment."
+    },
+    {
+      "source_id": "DEMO-006",
+      "title": "[Demo] Server response includes a version banner",
+      "severity": "low",
+      "asset": "api.example.invalid",
+      "file_path": "deploy/api/proxy.conf",
+      "line_number": 12,
+      "component": "demo-api-proxy",
+      "component_version": "1.0.0",
+      "cwe_id": 200,
+      "cvss_score": 3.1,
+      "description": "Synthetic example: a proxy response is modeled as disclosing an unnecessary software version banner. This low-priority record helps demonstrate severity filtering.",
+      "recommendation": "Suppress unnecessary version details in response headers and verify the behavior with a response-header test."
+    },
+    {
+      "source_id": "DEMO-007",
+      "title": "[Demo] Session cookie policy needs tightening",
+      "severity": "low",
+      "asset": "portal.example.invalid",
+      "file_path": "portal/config/session.ts",
+      "line_number": 16,
+      "component": "demo-portal-session",
+      "component_version": "3.1.0",
+      "cvss_score": 2.6,
+      "description": "Synthetic example: a session configuration is modeled with a more permissive cookie policy than the application's navigation requires. No cookie value or credential is included.",
+      "recommendation": "Review cross-site navigation requirements, select an appropriate SameSite policy, and verify that sign-in and sign-out continue to work."
+    },
+    {
+      "source_id": "DEMO-008",
+      "title": "[Demo] Frontend inventory entry is available for review",
+      "severity": "info",
+      "asset": "portal.example.invalid",
+      "file_path": "portal/package.json",
+      "component": "demo-account-portal",
+      "component_version": "3.1.0",
+      "description": "Synthetic informational record showing that frontend component metadata can be imported. This entry does not assert a vulnerability and contains no results from a real scan.",
+      "recommendation": "Review the component metadata, add a demo comment, and close the record when you have finished exploring the triage workflow."
+    }
+  ]
+}

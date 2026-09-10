@@ -81,6 +81,10 @@ jobs:
       - run: npm run test:e2e
       - run: npm run test:integration
       - run: npm audit --audit-level=high
+      - name: Local launcher regression tests
+        run: cd .. && python3 -m unittest discover -s scripts -p test_local.py -v
+      - name: Local quickstart and restart persistence
+        run: cd .. && SECOPS_LOCAL_SMOKE_TEST=1 python3 scripts/check_local.py
 
   containers:
     runs-on: ubuntu-latest
