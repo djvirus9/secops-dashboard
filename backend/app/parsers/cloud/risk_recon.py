@@ -19,7 +19,16 @@ class RiskReconParser(BaseParser):
                 first = data[0]
                 return isinstance(first, dict) and "finding" in first and "domain_name" in first
             if isinstance(data, dict):
-                return "findings" in data or "api_key" in data
+                if "api_key" in data:
+                    return True
+                findings = data.get("findings")
+                return (
+                    isinstance(findings, list) and bool(findings)
+                    and isinstance(findings[0], dict)
+                    and any(key in findings[0] for key in (
+                        "domain_name", "finding_id", "security_domain"
+                    ))
+                )
             return False
         except Exception:
             return False

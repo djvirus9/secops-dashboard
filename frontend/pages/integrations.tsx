@@ -181,7 +181,7 @@ export default function Integrations() {
           </p>
 
           <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm">
+            <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-xs">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
@@ -236,7 +236,7 @@ export default function Integrations() {
               )}
             </div>
 
-            <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm">
+            <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-xs">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
@@ -321,11 +321,11 @@ export default function Integrations() {
             {filteredParsers.map(parser => (
               <div
                 key={parser.name}
-                className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm hover:shadow-md transition-shadow"
+                className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-xs hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="font-semibold text-gray-900 dark:text-white">{parser.display_name}</h3>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_COLORS[parser.category] || CATEGORY_COLORS.generic}`}>
+                  <span className={`px-2 py-0.5 rounded-sm text-xs font-medium ${CATEGORY_COLORS[parser.category] || CATEGORY_COLORS.generic}`}>
                     {parser.category}
                   </span>
                 </div>
@@ -334,12 +334,12 @@ export default function Integrations() {
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{parser.description}</p>
                 <div className="flex flex-wrap gap-1">
                   {parser.file_types.map(ft => (
-                    <span key={ft} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-300">
+                    <span key={ft} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded-sm text-xs text-gray-600 dark:text-gray-300">
                       .{ft}
                     </span>
                   ))}
                   {!parser.auto_detectable && (
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                    <span className="rounded-sm bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
                       manual selection
                     </span>
                   )}
@@ -356,7 +356,7 @@ export default function Integrations() {
             Import results from an enabled scanner. Choose a parser or let the server detect a verified format.
           </p>
 
-          <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm">
+          <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-xs">
             <div className="space-y-4">
               <label className="grid gap-1 text-sm">Project / repository<input className="input" value={project} onChange={(event) => setProject(event.target.value)} placeholder="e.g., payments-api" /></label>
               <p className="text-xs text-gray-500 dark:text-gray-400">Use the same project for later scans of the same repository. Different projects keep matching files and components separate.</p>
@@ -437,7 +437,7 @@ export default function Integrations() {
             </div>
           </div>
 
-          <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm">
+          <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-xs">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Quick Start Examples</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">

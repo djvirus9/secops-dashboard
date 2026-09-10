@@ -169,7 +169,7 @@ export default function Dashboard() {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+    <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-xs">
       <div className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{title}</div>
       {children}
     </div>

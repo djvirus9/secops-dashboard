@@ -22,7 +22,7 @@ export default function Risks() {
       {data && (
         <div className="grid gap-4">
           {data.results.map((r) => (
-            <div key={`${r.project || ""}:${r.asset}`} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+            <div key={`${r.project || ""}:${r.asset}`} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="break-all font-mono text-sm text-gray-900 dark:text-white">{r.project && `${r.project} / `}{r.asset}</div>
                 <span className="rounded-full border dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-300">max {r.max_risk}</span>

@@ -73,8 +73,10 @@ npm audit --audit-level=high
 On Linux, Playwright may require system packages; its documented
 `npx playwright install --with-deps chromium` command installs them. The browser
 tests use synthetic data and isolated services. CI additionally runs CodeQL,
-container startup checks, and a backup/restore smoke test. Include the checks you
-ran and any relevant limitations in your pull request.
+container startup checks, and a backup/restore smoke test. Frontend CI covers
+Node 24 LTS and the optional Node 26 runtime; keep Node 24 as the default for
+local development. Include the checks you ran and any relevant limitations in
+your pull request.
 
 ## Change parsers and persistence carefully
 

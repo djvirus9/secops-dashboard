@@ -2,6 +2,10 @@
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  experimental: {
+    // TypeScript 7 provides a native CLI instead of the JavaScript compiler API.
+    useTypeScriptCli: true,
+  },
   turbopack: {
     root: __dirname,
   },

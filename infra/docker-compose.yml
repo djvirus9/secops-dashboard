@@ -81,6 +81,8 @@ services:
   frontend:
     build:
       context: ../frontend
+      args:
+        NODE_MAJOR: ${FRONTEND_NODE_MAJOR:-24}
     restart: unless-stopped
     init: true
     environment:

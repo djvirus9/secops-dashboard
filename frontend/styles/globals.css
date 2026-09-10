@@ -1,13 +1,30 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@source "../pages";
+@source "../components";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
+  /* Preserve the dashboard's v3 defaults where v4 uses browser defaults. */
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+  input::placeholder, textarea::placeholder { color: var(--color-gray-400); }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
   body { @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100; }
-  :focus-visible { @apply outline outline-2 outline-offset-2 outline-indigo-500; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-indigo-500; }
 }
 
 @layer components {
+  .skip-link { @apply sr-only; }
+  .skip-link:focus {
+    @apply not-sr-only rounded-lg bg-white px-4 py-2 text-gray-900 shadow-lg dark:bg-gray-800 dark:text-white;
+    /* Revealing the skip link must not move controls during a pointer click. */
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 50;
+  }
   .input { @apply min-w-0 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-white; }
   .button-secondary { @apply rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-700; }
 }

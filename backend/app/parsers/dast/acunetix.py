@@ -18,7 +18,14 @@ class AcunetixParser(BaseParser):
         try:
             if content.strip().startswith("{"):
                 data = json.loads(content)
-                return "vulnerabilities" in data or "scans" in data
+                if "scans" in data:
+                    return True
+                vulns = data.get("vulnerabilities")
+                return (
+                    isinstance(vulns, list) and bool(vulns)
+                    and isinstance(vulns[0], dict)
+                    and ("vt_name" in vulns[0] or "affects_url" in vulns[0])
+                )
             elif content.strip().startswith("<"):
                 return "acunetix" in content.lower()[:500] or "ScanGroup" in content[:500]
             return False
