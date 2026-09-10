@@ -1,9 +1,10 @@
 import json
-import re
-import defusedxml.ElementTree as ET
 from typing import List, Optional
 
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory, Severity
 
 XML_NAMESPACE = "https://www.veracode.com/schema/reports/export/1.0"
 XML_NS = {"x": XML_NAMESPACE}
@@ -26,6 +27,14 @@ JSON_SEVERITY_MAP = {
 }
 
 
+def _is_veracode_xml(content: str) -> bool:
+    try:
+        root = ET.fromstring(content)
+    except (ET.ParseError, DefusedXmlException):
+        return False
+    return root.tag == f"{{{XML_NAMESPACE}}}detailedreport"
+
+
 def _xml_parse(content: str) -> List[ParsedFinding]:
     findings = []
     root = ET.fromstring(content)
@@ -33,8 +42,6 @@ def _xml_parse(content: str) -> List[ParsedFinding]:
     # Handle namespace prefix
     def tag(local):
         return f"{{{XML_NAMESPACE}}}{local}"
-
-    app_id = root.get("app_id", "")
 
     for category_node in root.iter(tag("category")):
         mitigation_parts = []
@@ -205,20 +212,14 @@ class VeracodeParser(BaseParser):
     @classmethod
     def can_parse(cls, content: str, filename: Optional[str] = None) -> bool:
         if filename and filename.lower().endswith(".xml"):
-            return "veracode.com" in content or "detailedreport" in content.lower()
+            return _is_veracode_xml(content)
         if filename and filename.lower().endswith(".json"):
             try:
                 data = json.loads(content)
                 return "findings" in data or ("_embedded" in data and "findings" in data.get("_embedded", {}))
             except Exception:
                 return False
-        # Try XML first
-        try:
-            if "veracode.com" in content:
-                return True
-        except Exception:
-            pass
-        return False
+        return content.lstrip().startswith("<") and _is_veracode_xml(content)
 
     def parse(self, content: str, filename: Optional[str] = None) -> List[ParsedFinding]:
         if filename and filename.lower().endswith(".json"):

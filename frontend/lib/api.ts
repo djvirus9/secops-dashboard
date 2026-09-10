@@ -4,14 +4,42 @@ async function throwApiError(res: Response, method: string, path: string): Promi
   throw new Error(`${method} ${path} failed: ${detail}`);
 }
 
+const STATIC_API_PATHS = new Map<string, string>([
+  ["/assets", "/api/assets"],
+  ["/assets/upsert", "/api/assets/upsert"],
+  ["/dashboard/summary", "/api/dashboard/summary"],
+  ["/findings", "/api/findings"],
+  ["/import/scan", "/api/import/scan"],
+  ["/ingest/signal", "/api/ingest/signal"],
+  ["/integrations", "/api/integrations"],
+  ["/integrations/slack/test", "/api/integrations/slack/test"],
+  ["/parsers", "/api/parsers"],
+]);
+const FINDING_PATH =
+  /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/comments)?$/i;
+
+function toApiUrl(path: string): string {
+  const staticPath = STATIC_API_PATHS.get(path);
+  if (staticPath) return staticPath;
+
+  const findingPath = FINDING_PATH.exec(path);
+  if (!findingPath) {
+    throw new Error("Unsupported API path");
+  }
+
+  const findingId = encodeURIComponent(findingPath[1]);
+  const suffix = findingPath[2] === "/comments" ? "/comments" : "";
+  return `/api/findings/${findingId}${suffix}`;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { cache: "no-store" });
+  const res = await fetch(toApiUrl(path), { cache: "no-store" });
   if (!res.ok) return throwApiError(res, "GET", path);
   return res.json();
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(toApiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -21,7 +49,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(toApiUrl(path), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

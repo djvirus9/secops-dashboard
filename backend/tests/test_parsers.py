@@ -145,3 +145,17 @@ def test_xml_entities_are_rejected_before_parser_exception_handlers():
 
     with pytest.raises(DefusedXmlException):
         parse_scan_results(malicious_xml, parser_name="nmap", filename="scan.xml")
+
+
+def test_veracode_detection_requires_the_exact_xml_namespace():
+    parser = get_parser("veracode")
+    assert parser is not None
+    valid = (
+        '<detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" '
+        'app_id="example" />'
+    )
+    misleading = "<report><url>https://veracode.com/example</url></report>"
+
+    assert parser.can_parse(valid, "results.xml")
+    assert not parser.can_parse(misleading, "results.xml")
+    assert not parser.can_parse("veracode.com", "results.xml")
