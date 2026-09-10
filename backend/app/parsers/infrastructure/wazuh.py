@@ -15,7 +15,14 @@ class WazuhParser(BaseParser):
     def can_parse(cls, content: str, filename: Optional[str] = None) -> bool:
         try:
             data = json.loads(content)
-            return isinstance(data, dict) and ("data" in data or "hits" in data)
+            if not isinstance(data, dict):
+                return False
+            # The adapter consumes these nested arrays, not arbitrary data/hits.
+            if isinstance(data.get("data"), dict):
+                return isinstance(data["data"].get("affected_items"), list)
+            if isinstance(data.get("hits"), dict):
+                return isinstance(data["hits"].get("hits"), list)
+            return False
         except Exception:
             return False
 

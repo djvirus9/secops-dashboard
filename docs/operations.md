@@ -59,7 +59,13 @@ for backend readiness. The worker health check verifies a recent successful
 database polling heartbeat. A green heartbeat does not prove Slack/Jira delivery;
 inspect the Notifications page for failed or uncertain deliveries.
 
-The images run as non-root users. Frontend build and runtime use Node 24 LTS.
+The images run as non-root users. Backend and worker use Python 3.14; frontend
+build and runtime default to Node.js 24 LTS. To evaluate Node 26, set
+`FRONTEND_NODE_MAJOR=26` in `.env` and rebuild with Compose; direct Docker builds
+can use `--build-arg NODE_MAJOR=26`. This changes all frontend image stages.
+Node 26 is Current as of the 0.1.0 release, with LTS planned for October 2026;
+see the [Node.js release announcement](https://nodejs.org/en/blog/release/v26.0.0).
+Keep Node 24 for the default production deployment and local development.
 Compose restarts services after a process failure; it does not replace an
 external availability monitor, restart a merely unhealthy process, or provide
 multi-host failover. Monitor readiness, worker heartbeat, failed delivery counts,

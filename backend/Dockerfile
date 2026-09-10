@@ -1,9 +1,9 @@
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 WORKDIR /build
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
-FROM python:3.12-slim AS runner
+FROM python:3.14-slim AS runner
 WORKDIR /app
 
 RUN addgroup --system --gid 1001 secops \

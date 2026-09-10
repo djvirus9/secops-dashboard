@@ -163,3 +163,56 @@ def test_veracode_detection_requires_the_exact_xml_namespace():
     assert parser.can_parse(valid, "results.xml")
     assert not parser.can_parse(misleading, "results.xml")
     assert not parser.can_parse("veracode.com", "results.xml")
+
+
+@pytest.mark.parametrize(
+    ("parser_name", "content"),
+    [
+        ("acunetix", {"vulnerabilities": [{"vt_name": "Synthetic issue", "affects_url": "https://example.invalid", "severity": 3}]}),
+        ("risk_recon", {"findings": [{"finding": "Synthetic issue", "domain_name": "example.invalid", "finding_id": "synthetic-1", "severity": "high"}]}),
+        ("wazuh", {"data": {"affected_items": [{"name": "example-package", "vulnerability": {"cve": "CVE-2026-0001", "severity": "high"}}]}}),
+        ("wazuh", {"hits": {"hits": [{"_source": {"vulnerability": {"id": "CVE-2026-0001", "severity": "high"}, "agent": {"name": "example.invalid"}}}]}}),
+        ("bearer", {"findings": [{"title": "Synthetic issue", "filename": "app.py", "severity": "high", "cwe_ids": ["CWE-79"]}]}),
+        ("bearer", {"critical": [], "high": [{"title": "Synthetic issue", "filename": "app.py", "severity": "high", "cwe_ids": ["CWE-79"]}], "medium": []}),
+    ],
+)
+def test_tightened_compatibility_detectors_preserve_explicit_opt_in(monkeypatch, parser_name, content):
+    encoded = json.dumps(content)
+    parser = get_parser(parser_name)
+    assert parser.get_info()["verification_status"] == "unverified"
+    assert parser.get_info()["enabled"] is False
+    with pytest.raises(ValueError, match="disabled"):
+        parse_scan_results(encoded, parser_name=parser_name)
+
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
+    assert ParserRegistry._can_parse(type(parser), encoded, "scan.json")
+    findings = parse_scan_results(encoded, parser_name=parser_name, filename="scan.json")
+    assert len(findings) == 1
+    assert findings[0].severity.value == "high"
+    assert parser.get_info()["verification_status"] == "unverified"
+
+
+@pytest.mark.parametrize(
+    ("parser_name", "content"),
+    [
+        ("acunetix", {"host": "example.invalid", "port": 443, "vulnerabilities": [{"id": "synthetic-1", "msg": "Synthetic Nikto issue"}]}),
+        ("acunetix", {"vulnerabilities": []}),
+        ("acunetix", {"vulnerabilities": ["vt_name"]}),
+        ("risk_recon", {"findings": [{"title": "Synthetic generic issue", "severity": "high"}]}),
+        ("risk_recon", {"findings": ["domain_name"]}),
+        ("wazuh", {"data": [{"title": "Synthetic generic issue"}]}),
+        ("wazuh", {"hits": []}),
+        ("wazuh", {"hits": {"total": 1}}),
+        ("wazuh", {"data": {"affected_items": "invalid"}}),
+        ("bearer", {"findings": [{"title": "Synthetic generic issue", "severity": "high"}]}),
+        ("bearer", {"findings": ["cwe_ids"]}),
+        ("bearer", {"critical": [], "high": "invalid", "medium": []}),
+    ],
+)
+def test_compatibility_detectors_reject_unrelated_or_malformed_shapes(parser_name, content):
+    assert not ParserRegistry._can_parse(type(get_parser(parser_name)), json.dumps(content), "scan.json")
+
+
+def test_registry_detects_legacy_instance_method_with_filename():
+    content = json.dumps({"version": "1.0", "generated_at": "2026-09-09T00:00:00Z", "results": {}})
+    assert ParserRegistry._can_parse(type(get_parser("detect_secrets")), content, "baseline.json")

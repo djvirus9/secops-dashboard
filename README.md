@@ -10,6 +10,9 @@ instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
+See the [0.1.0 release notes](CHANGELOG.md) for features, runtime compatibility,
+and upgrade notes.
+
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
 
 ## Try it locally
@@ -18,6 +21,10 @@ Install Python 3.12+ and Node.js 24+ (24 LTS recommended), then use macOS, Linux
 or Windows with WSL2. Docker and PostgreSQL are not needed for this quickstart.
 The first start downloads dependencies and builds the dashboard, so allow a few
 minutes and an internet connection to the package registries.
+
+Use a current browser. The Tailwind CSS 4 interface requires at least Chrome 111,
+Safari 16.4, or Firefox 128, following
+[Tailwind's browser requirements](https://tailwindcss.com/docs/compatibility).
 
 ```bash
 git clone https://github.com/djvirus9/secops-dashboard.git
@@ -75,6 +82,10 @@ set their own HTTPS origin explicitly.
 
 Requirements: Docker with Compose v2. For a public deployment, first follow the
 [production runbook](docs/operations.md), including HTTPS and backup setup.
+The images use Python 3.14 and default to Node.js 24 LTS. Set
+`FRONTEND_NODE_MAJOR=26` in `.env` to build the frontend image with Node 26.
+Node 26 is Current as of the 0.1.0 release; see the
+[Node.js release announcement](https://nodejs.org/en/blog/release/v26.0.0).
 
 ```bash
 umask 077

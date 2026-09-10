@@ -30,3 +30,7 @@ updates:
     directory: /frontend
     schedule:
       interval: monthly
+    # Promote the default runtime only after the next major enters LTS.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

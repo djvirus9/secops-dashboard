@@ -16,7 +16,16 @@ class BearerParser(BaseParser):
     def can_parse(cls, content: str, filename: Optional[str] = None) -> bool:
         try:
             data = json.loads(content)
-            return "findings" in data or ("high" in data and "critical" in data)
+            if not isinstance(data, dict):
+                return False
+            if all(isinstance(data.get(severity), list) for severity in ("critical", "high", "medium")):
+                return True
+            findings = data.get("findings")
+            return (
+                isinstance(findings, list) and bool(findings)
+                and isinstance(findings[0], dict)
+                and ("cwe_ids" in findings[0] or "documentation_url" in findings[0])
+            )
         except:
             return False
     

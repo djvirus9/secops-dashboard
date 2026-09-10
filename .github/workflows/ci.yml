@@ -52,7 +52,12 @@ jobs:
       - run: pip-audit -r requirements.txt
 
   frontend:
+    name: ${{ matrix.node-version == '24' && 'frontend' || 'frontend (Node 26)' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["24", "26"]
     defaults:
       run:
         working-directory: frontend
@@ -66,7 +71,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-python@v7
@@ -102,6 +107,8 @@ jobs:
       - uses: actions/checkout@v7
       - run: docker build -t secops-backend ./backend
       - run: docker build -t secops-frontend ./frontend
+      - name: Build optional Node 26 frontend
+        run: docker build --build-arg NODE_MAJOR=26 -t secops-frontend-node26 ./frontend
       - run: docker compose -f infra/docker-compose.yml up --build --wait --wait-timeout 120
       - run: python3 infra/smoke.py
       - run: infra/backup.sh /tmp/secops-ci.dump

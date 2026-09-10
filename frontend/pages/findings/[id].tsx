@@ -178,7 +178,7 @@ export default function FindingDetailPage() {
         <button className="button-secondary" disabled={saving} onClick={() => setLoadRevision((value) => value + 1)}>Refresh finding</button>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="break-words text-2xl font-semibold text-gray-900 dark:text-white">{finding.title}</h1>
@@ -260,7 +260,7 @@ export default function FindingDetailPage() {
         {finding.tags.length > 0 && (
           <div className="flex flex-wrap gap-2 border-t pt-4 dark:border-gray-700">
             {finding.tags.map((tag) => (
-              <span key={tag} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              <span key={tag} className="rounded-sm bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-200">
                 {tag}
               </span>
             ))}
@@ -284,7 +284,7 @@ export default function FindingDetailPage() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Triage Actions</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -327,7 +327,7 @@ export default function FindingDetailPage() {
       </div>
 
       {Boolean(finding.notifications?.length) && <section className="rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800"><h2 className="font-semibold">Notification delivery</h2><ul className="my-3 space-y-1 text-sm">{finding.notifications?.map((delivery) => <li key={delivery.id}>{delivery.channel}: {delivery.status.replaceAll("_", " ")}</li>)}</ul><Link href="/notifications" className="text-sm text-indigo-600 underline dark:text-indigo-400">Review delivery status</Link></section>}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Activity &amp; Comments</h2>
 
         <div className="space-y-4 border-b dark:border-gray-700 pb-4">
@@ -365,7 +365,7 @@ export default function FindingDetailPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-gray-900 dark:text-white">{c.author}</span>
                     {c.action_type === "update" && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
+                      <span className="text-xs px-2 py-0.5 rounded-sm bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
                         system
                       </span>
                     )}

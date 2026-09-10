@@ -123,7 +123,7 @@ export default function Assets() {
       <ErrorNotice message={err} />
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+        <form onSubmit={handleSubmit} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-xs">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             {editingId ? "Edit Asset" : "Add New Asset"}
           </h2>
@@ -220,11 +220,11 @@ export default function Assets() {
 
       {loading && <p role="status">Loading assets…</p>}
       {data && (data.results.length === 0 ? (
-        <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center shadow-sm">
+        <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center shadow-xs">
           <p className="text-gray-600 dark:text-gray-400">No matching assets. Change the search or add your first asset.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+        <div className="overflow-x-auto rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xs">
           <table className="min-w-full text-sm">
             <caption className="sr-only">Assets matching the current filters</caption>
             <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
@@ -246,17 +246,17 @@ export default function Assets() {
                   <td className="p-3">{asset.name}</td>
                   <td className="p-3 text-gray-600 dark:text-gray-400">{asset.owner || "-"}</td>
                   <td className="p-3">
-                    <span className="px-2 py-1 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                    <span className="px-2 py-1 rounded-sm text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
                       {asset.environment}
                     </span>
                   </td>
                   <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${criticalityColor[asset.criticality] || criticalityColor.medium}`}>
+                    <span className={`px-2 py-1 rounded-sm text-xs font-medium ${criticalityColor[asset.criticality] || criticalityColor.medium}`}>
                       {asset.criticality}
                     </span>
                   </td>
                   <td className="p-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${exposureColor[asset.exposure] || exposureColor.internal}`}>
+                    <span className={`px-2 py-1 rounded-sm text-xs font-medium ${exposureColor[asset.exposure] || exposureColor.internal}`}>
                       {asset.exposure}
                     </span>
                   </td>

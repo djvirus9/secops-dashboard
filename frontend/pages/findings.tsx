@@ -56,7 +56,7 @@ export default function FindingsPage() {
     {loading && <p role="status">Loading findings…</p>}
     {data && <>
       {data.results.length === 0 ? <p className="rounded-xl border p-6 dark:border-gray-700">No findings match these filters.</p> :
-        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="overflow-x-auto rounded-xl border bg-white shadow-xs dark:border-gray-700 dark:bg-gray-800">
           <table className="min-w-full text-sm">
             <caption className="sr-only">Security findings matching the current filters</caption>
             <thead className="bg-gray-50 dark:bg-gray-900"><tr>
@@ -64,7 +64,7 @@ export default function FindingsPage() {
             </tr></thead>
             <tbody>{data.results.map((finding) => <tr key={finding.id} className="border-t hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/50">
               <td className="p-3 font-semibold">{finding.risk_score}</td>
-              <td className="p-3"><span className={`rounded px-2 py-1 text-xs font-medium ${finding.severity === "critical" || finding.severity === "high" ? "bg-red-100 text-red-900 dark:bg-red-900/50 dark:text-red-200" : "bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-gray-100"}`}>{finding.severity}</span></td>
+              <td className="p-3"><span className={`rounded-sm px-2 py-1 text-xs font-medium ${finding.severity === "critical" || finding.severity === "high" ? "bg-red-100 text-red-900 dark:bg-red-900/50 dark:text-red-200" : "bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-gray-100"}`}>{finding.severity}</span></td>
               <td className="p-3">{finding.status}</td>
               <td className="p-3"><Link href={`/findings/${finding.id}`} className="text-indigo-600 hover:underline dark:text-indigo-400">{finding.title}</Link><div className="text-xs text-gray-500 dark:text-gray-400">{finding.tool}</div></td>
               <td className="p-3">{finding.project && <div className="font-medium">{finding.project}</div>}{finding.asset}</td>

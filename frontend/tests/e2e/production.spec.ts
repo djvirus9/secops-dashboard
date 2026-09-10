@@ -145,6 +145,45 @@ test('mobile navigation and forms fit the viewport and retain accessible names',
   await expect(page.getByRole('textbox', { name: 'Comment', exact: true })).toBeVisible();
 });
 
+test('dashboard styling preserves borders, focus indicators and the saved theme', async ({ page }) => {
+  // The dashboard's explicit theme preference takes precedence over the OS theme.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  const toggle = page.getByRole('button', { name: 'Toggle dark mode' });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const colors = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    const result: Record<string, string> = {};
+    for (const shade of ['50', '200', '700', '900']) {
+      probe.style.color = `var(--color-gray-${shade})`;
+      result[shade] = getComputedStyle(probe).color;
+    }
+    probe.remove();
+    return result;
+  });
+  await expect(page.locator('body')).toHaveCSS('background-color', colors['50']);
+  await expect(page.locator('header')).toHaveCSS('border-bottom-color', colors['200']);
+  const card = page.getByText('API Status', { exact: true }).locator('..');
+  await expect(card).toHaveCSS('border-width', '1px');
+  await expect(card).toHaveCSS('border-color', colors['200']);
+  await expect(card).toHaveCSS('box-shadow', /0px 1px 2px/);
+  await expect(toggle).toHaveCSS('cursor', 'pointer');
+
+  await page.keyboard.press('Tab');
+  const skip = page.getByRole('link', { name: 'Skip to content' });
+  await expect(skip).toBeFocused();
+  await expect(skip).toHaveCSS('outline-width', '2px');
+  await expect(skip).toHaveCSS('outline-offset', '2px');
+
+  await toggle.click();
+  await expect(page.locator('body')).toHaveCSS('background-color', colors['900']);
+  await expect(page.locator('header')).toHaveCSS('border-bottom-color', colors['700']);
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('body')).toHaveCSS('background-color', colors['900']);
+});
+
 test('history shows import outcomes and ambiguous delivery retries require explicit confirmation', async ({ page, request }) => {
   await page.goto('/imports');
   await expect(page.getByRole('cell', { name: 'completed', exact: true })).toBeVisible();
