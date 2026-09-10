@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dashboardOrigins, isConfiguredSecret, isTrustedMutation } from "./lib/origins";
 
 function safeEqual(left: string, right: string): boolean {
   const maxLength = Math.max(left.length, right.length);
@@ -12,7 +13,9 @@ function safeEqual(left: string, right: string): boolean {
 function readBasicCredentials(header: string | null): [string, string] | null {
   if (!header?.startsWith("Basic ")) return null;
   try {
-    const decoded = atob(header.slice(6));
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(
+      Uint8Array.from(atob(header.slice(6)), (character) => character.charCodeAt(0))
+    );
     const separator = decoded.indexOf(":");
     if (separator < 0) return null;
     return [decoded.slice(0, separator), decoded.slice(separator + 1)];
@@ -35,30 +38,26 @@ function isUnsafeMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
 }
 
-function hasTrustedOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-
-  try {
-    return new URL(origin).origin === request.nextUrl.origin;
-  } catch {
-    return false;
-  }
-}
-
 export function proxy(request: NextRequest): NextResponse {
-  if (request.nextUrl.pathname === "/_health") {
-    return NextResponse.json({ status: "ok" });
-  }
-
   const expectedUser = process.env.DASHBOARD_USERNAME || "";
   const expectedPassword = process.env.DASHBOARD_PASSWORD || "";
-  if (!expectedUser || !expectedPassword) {
+  if (!expectedUser || !isConfiguredSecret(expectedPassword, 24) || !isConfiguredSecret(process.env.API_KEY || "", 32)) {
     return NextResponse.json(
-      { detail: "Dashboard authentication is not configured" },
+      { detail: "Dashboard authentication is not securely configured" },
       { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }
+
+  let allowedOrigins: Set<string>;
+  try {
+    allowedOrigins = dashboardOrigins(process.env.DASHBOARD_ORIGINS);
+  } catch {
+    return NextResponse.json(
+      { detail: "Dashboard origins are not configured correctly" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+  if (request.nextUrl.pathname === "/_health") return NextResponse.json({ status: "ok" });
 
   const credentials = readBasicCredentials(request.headers.get("authorization"));
   if (
@@ -69,9 +68,7 @@ export function proxy(request: NextRequest): NextResponse {
     return unauthorized();
   }
 
-  // Browsers cache Basic credentials and can attach them to cross-site form
-  // submissions, so reject unsafe requests carrying an untrusted Origin.
-  if (isUnsafeMethod(request.method) && !hasTrustedOrigin(request)) {
+  if (isUnsafeMethod(request.method) && !isTrustedMutation(request.headers, allowedOrigins)) {
     return NextResponse.json(
       { detail: "Cross-origin state change rejected" },
       { status: 403, headers: { "Cache-Control": "no-store" } }
@@ -79,7 +76,9 @@ export function proxy(request: NextRequest): NextResponse {
   }
 
   if (!request.nextUrl.pathname.startsWith("/api/")) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   }
 
   const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
@@ -120,7 +119,9 @@ export function proxy(request: NextRequest): NextResponse {
   headers.delete("authorization");
   headers.delete("host");
 
-  return NextResponse.rewrite(destination, { request: { headers } });
+  const response = NextResponse.rewrite(destination, { request: { headers } });
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }
 
 export const config = {

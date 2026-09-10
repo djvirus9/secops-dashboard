@@ -1,8 +1,9 @@
 from typing import Optional, List, Dict, Any
-
-from defusedxml.ElementTree import fromstring as parse_safe_xml
+from defusedxml.common import DefusedXmlException
 
 from .base import BaseParser, ParsedFinding, ParserRegistry
+from .support import VERIFIED_PARSERS, parser_availability
+from .validation import ScanValidationError, decode_document, validate_findings, validate_verified_document
 
 from .sast import *
 from .dast import *
@@ -34,20 +35,32 @@ def parse_scan_results(
     parser_name: Optional[str] = None,
     filename: Optional[str] = None,
 ) -> List[ParsedFinding]:
+    content = content.lstrip("\ufeff")
     if parser_name:
         parser = get_parser(parser_name)
         if not parser:
-            raise ValueError(f"Unknown parser: {parser_name}")
+            raise ScanValidationError("Unknown parser; select a parser from the supported parser list")
     else:
         parser_class = ParserRegistry.auto_detect(content, filename)
         if not parser_class:
-            raise ValueError("Could not auto-detect parser for this content")
+            raise ScanValidationError("Could not auto-detect parser for this content; select a verified parser explicitly")
         parser = parser_class()
 
-    if "xml" in parser.file_types and content.lstrip().startswith("<"):
-        # Validate once outside individual parser exception handlers so entity
-        # expansion and malformed XML are rejected instead of becoming a
-        # misleading successful import with zero findings.
-        parse_safe_xml(content)
-    
-    return ParserRegistry.parse(parser, content, filename)
+    availability = parser_availability(parser.name)
+    if not availability["enabled"]:
+        raise ScanValidationError(f"Parser '{parser.name}' is disabled. {availability['unavailable_reason']}")
+
+    try:
+        kind, document = decode_document(parser, content)
+        expected_count = None
+        if parser.name in VERIFIED_PARSERS:
+            expected_count = validate_verified_document(parser.name, kind, document)
+        findings = ParserRegistry.parse(parser, content, filename)
+        validate_findings(findings, expected_count)
+        return findings
+    except (ScanValidationError, DefusedXmlException):
+        raise
+    except Exception as error:
+        # Some legacy parsers include values from scanner output in exception
+        # messages. Never expose those messages in the API or import history.
+        raise ScanValidationError("Unable to parse the complete report; verify its format and field types") from error

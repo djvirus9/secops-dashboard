@@ -77,7 +77,7 @@ def test_unauthenticated_import_is_rejected_before_body_processing(client, monke
 
 
 def test_admin_and_ingest_keys_must_be_distinct(client, auth_headers, monkeypatch):
-    monkeypatch.setenv("INGEST_API_KEY", "test-api-key")
+    monkeypatch.setenv("INGEST_API_KEY", auth_headers["X-API-Key"])
 
     response = client.get("/findings", headers=auth_headers)
 

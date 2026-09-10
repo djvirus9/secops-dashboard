@@ -1,0 +1,17 @@
+{
+  "parsers": [
+    "credscan"
+  ],
+  "filename": "scan.csv",
+  "valid": "CredentialType,FileName,LineNumber\nExample credential,app.py,12\n",
+  "clean": "CredentialType,FileName,LineNumber\n",
+  "invalid": "FileName,LineNumber\napp.py,12\n",
+  "expected": [
+    {
+      "source_id": "Example credential",
+      "file_path": "app.py",
+      "line_number": 12,
+      "severity": "high"
+    }
+  ]
+}

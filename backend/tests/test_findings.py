@@ -126,7 +126,8 @@ def test_import_preserves_locations_but_omits_raw_scanner_data(client, auth_head
     assert "must-not-be-stored" not in json.dumps(payloads)
 
 
-def test_secret_scanner_values_are_redacted_everywhere(client, auth_headers):
+def test_secret_scanner_values_are_redacted_everywhere(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
     sentinel = "FAKE-LIVE-SECRET-123456789"
     content = json.dumps(
         [

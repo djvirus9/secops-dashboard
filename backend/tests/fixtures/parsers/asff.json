@@ -1,0 +1,60 @@
+{
+  "parsers": [
+    "aws-security-hub",
+    "aws_asff"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "Findings": [
+      {
+        "SchemaVersion": "2018-10-08",
+        "Id": "example-finding",
+        "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+        "AwsAccountId": "123456789012",
+        "GeneratorId": "example-rule",
+        "Types": [
+          "Software and Configuration Checks"
+        ],
+        "CreatedAt": "2026-09-10T00:00:00Z",
+        "UpdatedAt": "2026-09-10T00:00:00Z",
+        "Title": "Example",
+        "Description": "Synthetic example",
+        "Severity": {
+          "Label": "HIGH"
+        },
+        "Resources": [
+          {
+            "Type": "Other",
+            "Id": "service-a"
+          },
+          {
+            "Type": "Other",
+            "Id": "service-b"
+          }
+        ]
+      }
+    ]
+  },
+  "clean": {
+    "Findings": []
+  },
+  "invalid": {
+    "Findings": [
+      {
+        "Title": "Example"
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "example-finding",
+      "severity": "high",
+      "asset": "service-a"
+    },
+    {
+      "source_id": "example-finding",
+      "severity": "high",
+      "asset": "service-b"
+    }
+  ]
+}

@@ -32,3 +32,4 @@ yarn-error.log*
 
 # Docker
 *.local.yml
+backups/

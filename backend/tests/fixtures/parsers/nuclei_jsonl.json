@@ -1,0 +1,17 @@
+{
+  "parsers": [
+    "nuclei"
+  ],
+  "filename": "scan.jsonl",
+  "valid": "{\"template-id\": \"example\", \"info\": {\"name\": \"Example\", \"severity\": \"high\"}, \"host\": \"https://example.test\", \"matched-at\": \"https://example.test/admin\"}\n{\"template-id\": \"example\", \"info\": {\"name\": \"Example\", \"severity\": \"high\"}, \"host\": \"https://example.test\", \"matched-at\": \"https://example.test/login\"}\n",
+  "clean": "[]\n",
+  "invalid": "{\"template-id\": \"example\", \"info\": {\"name\": \"Example\", \"severity\": \"high\"}, \"host\": \"https://example.test\", \"matched-at\": \"https://example.test/admin\"}\n{\"truncated\":",
+  "expected": [
+    {
+      "component": "https://example.test/admin"
+    },
+    {
+      "component": "https://example.test/login"
+    }
+  ]
+}

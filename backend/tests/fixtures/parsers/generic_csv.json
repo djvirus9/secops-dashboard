@@ -1,0 +1,18 @@
+{
+  "parsers": [
+    "generic-csv"
+  ],
+  "filename": "scan.csv",
+  "valid": "title,severity,asset,source_id,component,component_version\nExample,high,service-a,rule-1,lib-example,1.0\n",
+  "clean": "title,severity,asset\n",
+  "invalid": "title,severity\nExample,high,unexpected\n",
+  "expected": [
+    {
+      "title": "Example",
+      "severity": "high",
+      "source_id": "rule-1",
+      "component": "lib-example",
+      "component_version": "1.0"
+    }
+  ]
+}

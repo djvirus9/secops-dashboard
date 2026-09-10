@@ -38,7 +38,8 @@ def test_catch_all_parsers_are_marked_non_auto_detectable():
     assert ParserRegistry.is_auto_detectable(parser_class) is False
 
 
-def test_legacy_parser_signatures_and_field_aliases_are_supported():
+def test_legacy_parser_signatures_and_field_aliases_are_supported(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
     content = json.dumps(
         {
             "results": [
@@ -55,7 +56,8 @@ def test_legacy_parser_signatures_and_field_aliases_are_supported():
     assert findings[0].severity.value == "high"
 
 
-def test_string_severities_from_legacy_parsers_are_normalized():
+def test_string_severities_from_legacy_parsers_are_normalized(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
     content = json.dumps(
         {
             "version": "1.0",
@@ -120,6 +122,7 @@ def test_representative_formats_auto_detect_without_ambiguity(expected, content)
 
 
 def test_ambiguous_specific_formats_require_explicit_parser(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
     class First:
         name = "first"
         auto_detectable = True
@@ -138,7 +141,8 @@ def test_ambiguous_specific_formats_require_explicit_parser(monkeypatch):
     monkeypatch.setattr(ParserRegistry, "_parsers", original)
 
 
-def test_xml_entities_are_rejected_before_parser_exception_handlers():
+def test_xml_entities_are_rejected_before_parser_exception_handlers(monkeypatch):
+    monkeypatch.setenv("ALLOW_UNVERIFIED_PARSERS", "true")
     malicious_xml = """<!DOCTYPE nmaprun [
     <!ENTITY secret "expanded-value">
     ]><nmaprun><host><address addr="&secret;" /></host></nmaprun>"""

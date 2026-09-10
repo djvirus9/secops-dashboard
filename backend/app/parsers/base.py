@@ -7,6 +7,9 @@ from typing import Optional, List, Dict, Any, Type
 from enum import Enum
 from inspect import signature
 
+from .support import parser_availability
+from .validation import ScanValidationError
+
 
 class ScannerCategory(str, Enum):
     SAST = "sast"
@@ -31,7 +34,7 @@ class Severity(str, Enum):
     INFO = "info"
 
     @classmethod
-    def normalize(cls, value: str) -> "Severity":
+    def normalize(cls, value: str, *, strict: bool = False) -> "Severity":
         mapping = {
             "critical": cls.CRITICAL,
             "crit": cls.CRITICAL,
@@ -54,7 +57,10 @@ class Severity(str, Enum):
             "none": cls.INFO,
             "unknown": cls.INFO,
         }
-        return mapping.get(str(value).lower().strip(), cls.INFO)
+        key = str(value).lower().strip()
+        if strict and key not in mapping:
+            raise ScanValidationError("Invalid scanner severity value")
+        return mapping.get(key, cls.INFO)
 
 
 @dataclass
@@ -70,6 +76,9 @@ class ParsedFinding:
     cwe_id: Optional[int] = None
     cve_id: Optional[str] = None
     cvss_score: Optional[float] = None
+    source_id: Optional[str] = None
+    component: Optional[str] = None
+    component_version: Optional[str] = None
     # Compatibility aliases used by older parser implementations.
     cwe: Optional[Any] = field(default=None, repr=False)
     cve: Optional[str] = field(default=None, repr=False)
@@ -114,6 +123,9 @@ class ParsedFinding:
             "cwe_id": self.cwe_id,
             "cve_id": self.cve_id,
             "cvss_score": self.cvss_score,
+            "source_id": self.source_id,
+            "component": self.component,
+            "component_version": self.component_version,
             "recommendation": self.recommendation,
             "references": self.references,
             "tags": self.tags,
@@ -146,6 +158,7 @@ class BaseParser(ABC):
             "category": self.category.value,
             "file_types": self.file_types,
             "description": self.description,
+            **parser_availability(self.name),
         }
 
 
@@ -228,6 +241,8 @@ class ParserRegistry:
     def auto_detect(cls, content: str, filename: Optional[str] = None) -> Optional[Type[BaseParser]]:
         matches = []
         for parser_class in cls._parsers.values():
+            if not parser_availability(parser_class.name)["enabled"]:
+                continue
             if not cls.is_auto_detectable(parser_class):
                 continue
             try:
@@ -236,9 +251,12 @@ class ParserRegistry:
             except Exception:
                 continue
 
+        # CodeQL is a verified specialization of SARIF, not a competing format.
+        if any(parser.name == "codeql" for parser in matches):
+            matches = [parser for parser in matches if parser.name != "sarif"]
         if len(matches) > 1:
             names = ", ".join(parser.name for parser in matches)
-            raise ValueError(
+            raise ScanValidationError(
                 f"Ambiguous scan format; select a parser explicitly. Matches: {names}"
             )
         return matches[0] if matches else None

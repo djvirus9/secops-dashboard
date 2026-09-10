@@ -34,6 +34,7 @@ class BanditParser(BaseParser):
                 title=f"{result.get('test_id', 'B000')}: {result.get('test_name', 'Unknown')}",
                 severity=Severity.normalize(result.get("issue_severity", "LOW")),
                 tool="bandit",
+                source_id=result.get("test_id"),
                 description=result.get("issue_text", ""),
                 asset=result.get("filename", "unknown"),
                 file_path=result.get("filename"),

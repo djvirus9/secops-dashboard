@@ -9,40 +9,44 @@ const nav = [
   { href: "/assets", label: "Assets" },
   { href: "/risks", label: "Risks" },
   { href: "/integrations", label: "Integrations" },
+  { href: "/imports", label: "Imports" },
+  { href: "/notifications", label: "Delivery" },
 ];
 
 export default function App({ Component, pageProps, router }: AppProps) {
   const [darkMode, setDarkMode] = useState(false);
+  const [themeReady, setThemeReady] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("darkMode");
-    if (saved === "true") {
-      setDarkMode(true);
-    }
+    try { setDarkMode(localStorage.getItem("darkMode") === "true"); } catch { /* Storage may be disabled. */ }
+    setThemeReady(true);
   }, []);
 
   useEffect(() => {
+    if (!themeReady) return;
     if (darkMode) {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
-    localStorage.setItem("darkMode", String(darkMode));
-  }, [darkMode]);
+    try { localStorage.setItem("darkMode", String(darkMode)); } catch { /* Theme still works in memory. */ }
+  }, [darkMode, themeReady]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:block focus:p-3">Skip to content</a>
       <header className="border-b bg-white dark:bg-gray-800 dark:border-gray-700">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex flex-col items-start gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="font-semibold text-gray-900 dark:text-white">SecOps Dashboard</div>
-          <div className="flex items-center gap-4">
-            <nav className="flex gap-2">
+          <div className="flex w-full min-w-0 items-start gap-2 lg:w-auto">
+            <nav aria-label="Main navigation" className="flex min-w-0 flex-1 flex-wrap gap-2">
               {nav.map((n) => {
-                const active = router.pathname === n.href;
+                const active = router.pathname === n.href || (n.href !== "/" && router.pathname.startsWith(`${n.href}/`));
                 return (
                   <Link
                     key={n.href}
                     href={n.href}
+                    aria-current={active ? "page" : undefined}
                     className={
                       "rounded-md px-3 py-1 text-sm border transition-colors " +
                       (active
@@ -59,6 +63,7 @@ export default function App({ Component, pageProps, router }: AppProps) {
               onClick={() => setDarkMode(!darkMode)}
               className="p-2 rounded-lg border bg-white hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 dark:border-gray-600 transition-colors"
               aria-label="Toggle dark mode"
+              aria-pressed={darkMode}
             >
               {darkMode ? (
                 <svg className="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
@@ -74,7 +79,7 @@ export default function App({ Component, pageProps, router }: AppProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main id="main-content" className="mx-auto min-w-0 max-w-6xl px-4 sm:px-6 py-8">
         <Component {...pageProps} />
       </main>
     </div>

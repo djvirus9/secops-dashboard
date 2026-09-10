@@ -21,9 +21,11 @@ def _utcnow() -> datetime:
 
 class Asset(Base):
     __tablename__ = "assets"
+    __table_args__ = (UniqueConstraint("project", "key", name="uq_assets_project_key"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
-    key: Mapped[str] = mapped_column(String, unique=True, index=True)
+    project: Mapped[str] = mapped_column(String, default="", index=True)
+    key: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String, default="")
     environment: Mapped[str] = mapped_column(String, default="unknown")
     owner: Mapped[str] = mapped_column(String, default="")
@@ -41,6 +43,7 @@ class Signal(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     tool: Mapped[str] = mapped_column(String, index=True)
+    import_id: Mapped[str | None] = mapped_column(String, ForeignKey("imports.id"), nullable=True, index=True)
     payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
@@ -54,6 +57,10 @@ class Finding(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
 
     tool: Mapped[str] = mapped_column(String, index=True)
+    project: Mapped[str] = mapped_column(String, default="", index=True)
+    source_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    component: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    component_version: Mapped[str | None] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, index=True)
     severity: Mapped[str] = mapped_column(String)
 
@@ -99,3 +106,40 @@ class Comment(Base):
     action_type: Mapped[str | None] = mapped_column(String, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ImportRun(Base):
+    __tablename__ = "imports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    parser: Mapped[str] = mapped_column(String, default="auto")
+    filename: Mapped[str | None] = mapped_column(String, nullable=True)
+    project: Mapped[str] = mapped_column(String, default="", index=True)
+    actor: Mapped[str] = mapped_column(String)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String, default="processing", index=True)
+    imported: Mapped[int] = mapped_column(Integer, default=0)
+    new_findings: Mapped[int] = mapped_column(Integer, default=0)
+    deduplicated: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    event_key: Mapped[str] = mapped_column(String, unique=True)
+    finding_id: Mapped[str | None] = mapped_column(String, ForeignKey("findings.id"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)
+    payload: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    claim_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

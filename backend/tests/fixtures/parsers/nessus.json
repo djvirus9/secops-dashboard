@@ -1,0 +1,17 @@
+{
+  "parsers": [
+    "nessus"
+  ],
+  "filename": "scan.nessus",
+  "valid": "<NessusClientData_v2><Report name=\"Example\"><ReportHost name=\"example.test\"><ReportItem severity=\"4\" port=\"443\" protocol=\"tcp\" pluginID=\"100\" pluginName=\"Example\"><description>Example</description><cvss3_base_score>9.8</cvss3_base_score><cvss_base_score>7.0</cvss_base_score></ReportItem></ReportHost></Report></NessusClientData_v2>",
+  "clean": "<NessusClientData_v2><Report name=\"Example\" /></NessusClientData_v2>",
+  "invalid": "<NessusClientData_v2><Report><ReportHost><ReportItem severity=\"unknown\" /></ReportHost></Report></NessusClientData_v2>",
+  "expected": [
+    {
+      "source_id": "100",
+      "component": "tcp:443",
+      "severity": "critical",
+      "cvss_score": 9.8
+    }
+  ]
+}

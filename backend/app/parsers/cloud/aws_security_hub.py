@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from typing import List, Optional
 
 from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
@@ -54,6 +55,7 @@ class AWSSecurityHubParser(BaseParser):
                 title=asff.get("Title", "AWS Security Hub Finding"),
                 severity=severity_map.get(severity_label, Severity.INFO),
                 tool="aws-security-hub",
+                source_id=asff.get("Id"),
                 description=asff.get("Description", ""),
                 asset=asset,
                 recommendation=asff.get("Remediation", {}).get("Recommendation", {}).get("Text", ""),
@@ -62,5 +64,9 @@ class AWSSecurityHubParser(BaseParser):
                 raw_data=asff,
             )
             findings.append(finding)
+            # ASFF may attach the same issue to several independently owned
+            # resources. Preserve each affected resource in the normalized scan.
+            for resource in resources[1:]:
+                findings.append(replace(finding, asset=resource["Id"]))
         
         return findings

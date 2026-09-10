@@ -27,9 +27,7 @@ class CredScanParser(BaseParser):
         try:
             if content.strip().startswith("{") or content.strip().startswith("["):
                 data = json.loads(content)
-                creds = data.get("credentials", data.get("matches", []))
-                if isinstance(data, list):
-                    creds = data
+                creds = data if isinstance(data, list) else data.get("credentials", data.get("matches", []))
                 for cred in creds:
                     findings.append(ParsedFinding(
                         title=f"Credential Found: {cred.get('type', cred.get('SearcherName', 'Unknown'))}",
@@ -37,6 +35,9 @@ class CredScanParser(BaseParser):
                         severity="high",
                         tool=self.name,
                         asset=cred.get("file", cred.get("FileName", "unknown")),
+                        source_id=cred.get("type", cred.get("SearcherName")),
+                        file_path=cred.get("file", cred.get("FileName")),
+                        line_number=int(cred.get("line", cred.get("LineNumber"))) if cred.get("line", cred.get("LineNumber")) else None,
                         raw_data=cred
                     ))
             else:
@@ -48,6 +49,9 @@ class CredScanParser(BaseParser):
                         severity="high",
                         tool=self.name,
                         asset=row.get("FileName", row.get("File", "unknown")),
+                        source_id=row.get("CredentialType", row.get("SearcherName")),
+                        file_path=row.get("FileName", row.get("File")),
+                        line_number=int(row.get("LineNumber")) if row.get("LineNumber") else None,
                         raw_data=dict(row)
                     ))
         except:

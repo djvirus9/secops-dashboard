@@ -88,9 +88,12 @@ class GenericJSONParser(BaseParser):
             refs = []
         
         return ParsedFinding(
-            title=str(title)[:200],
+            title=str(title),
             severity=Severity.normalize(severity_str) if severity_str else Severity.MEDIUM,
             tool="generic-json",
+            source_id=str(item.get("source_id", item.get("rule_id", item.get("id")))) if item.get("source_id", item.get("rule_id", item.get("id"))) is not None else None,
+            component=str(item["component"]) if item.get("component") is not None else None,
+            component_version=str(item["component_version"]) if item.get("component_version") is not None else None,
             description=str(description) if description else "",
             asset=str(asset) if asset else "unknown",
             file_path=str(file_path) if file_path else None,

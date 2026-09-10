@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import { useMemo, useState } from "react";
+import { apiPost } from "../lib/api";
+import Link from "next/link";
+import { useApiResource } from "../lib/use-api-resource";
+import { ErrorNotice } from "../components/feedback";
 
 type Health = { status: string };
 type Summary = {
@@ -18,14 +21,10 @@ type SubmitResult = {
   occurrences: number;
 };
 
-const API = {
-  health: "/api/health",
-};
-
 export default function Dashboard() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthErr, setHealthErr] = useState<string | null>(null);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const { data: health, error: healthErr, loading: healthLoading, reload: reloadHealth } = useApiResource<Health>("/health");
+  const { data: summary, error: summaryError, loading: summaryLoading, reload: loadSummary } = useApiResource<Summary>("/dashboard/summary");
+  const [project, setProject] = useState("");
 
   const [tool, setTool] = useState("nuclei");
   const [severity, setSeverity] = useState("high");
@@ -39,32 +38,9 @@ export default function Dashboard() {
   const [submitting, setSubmitting] = useState(false);
 
   const payload = useMemo(
-    () => ({ tool, severity, title, asset, exposure, criticality }),
-    [tool, severity, title, asset, exposure, criticality]
+    () => ({ tool, severity, title, asset, exposure, criticality, project }),
+    [tool, severity, title, asset, exposure, criticality, project]
   );
-
-  useEffect(() => {
-    const run = async () => {
-      try {
-        setHealthErr(null);
-        const r = await fetch(API.health);
-        const j = await r.json();
-        if (!r.ok) throw new Error(j?.detail || `HTTP ${r.status}`);
-        setHealth(j);
-      } catch (e: any) {
-        setHealth(null);
-        setHealthErr(e?.message || "Failed to reach API");
-      }
-    };
-    run();
-    loadSummary();
-  }, []);
-
-  const loadSummary = () => {
-    apiGet<Summary>("/dashboard/summary")
-      .then(setSummary)
-      .catch((error) => setHealthErr(error instanceof Error ? error.message : "Failed to load summary"));
-  };
 
   const submit = async () => {
     try {
@@ -89,18 +65,21 @@ export default function Dashboard() {
         <p className="text-sm text-gray-600 dark:text-gray-400">Vulnerability management dashboard — ingest, triage, and track findings across your stack.</p>
       </div>
 
+      <ErrorNotice message={summaryError} retry={loadSummary} />
+      <ErrorNotice message={healthErr} retry={reloadHealth} />
+      {summaryLoading && <p role="status" className="text-sm">Loading summary…</p>}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card title="API Status">
           {health ? (
             <div className="space-y-2">
               <div className="inline-flex rounded-full border dark:border-gray-600 px-2 py-1 text-sm text-gray-900 dark:text-white">✅ {health.status}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">Authenticated server-side API proxy</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">API available</div>
             </div>
           ) : (
             <div className="space-y-2">
               <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800 p-3 text-sm text-gray-900 dark:text-white">
-                ❌ Not reachable<br />
-                <span className="text-xs text-gray-600 dark:text-gray-400">{healthErr || "Start backend on port 8000"}</span>
+                {healthLoading ? "Checking API…" : "API unavailable"}<br />
+                <span className="text-xs text-gray-600 dark:text-gray-400">{healthErr}</span>
               </div>
             </div>
           )}
@@ -111,16 +90,19 @@ export default function Dashboard() {
         <MetricCard label="Assets" value={summary?.assets} tone="text-indigo-600 dark:text-indigo-400" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Send Test Signal">
+      <div className="flex flex-wrap gap-3 text-sm"><Link href="/findings" className="button-secondary">Triage findings</Link><Link href="/integrations" className="button-secondary">Import scan results</Link></div>
+      <details className="rounded-xl border p-4 dark:border-gray-700"><summary className="cursor-pointer font-medium">Send a manual signal</summary>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Card title="Manual signal">
           <div className="grid gap-3">
+            <Field label="Project"><input className="input" value={project} onChange={(event) => setProject(event.target.value)} placeholder="e.g., payments-api" /></Field>
             <Field label="Tool">
               <input className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={tool} onChange={(e) => setTool(e.target.value)} />
             </Field>
 
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Severity">
-                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" aria-label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value)}>
                   <option value="info">info</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
@@ -129,7 +111,7 @@ export default function Dashboard() {
                 </select>
               </Field>
               <Field label="Exposure">
-                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={exposure} onChange={(e) => setExposure(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" aria-label="Exposure" value={exposure} onChange={(e) => setExposure(e.target.value)}>
                   <option value="internal">internal</option>
                   <option value="internet">internet</option>
                 </select>
@@ -138,7 +120,7 @@ export default function Dashboard() {
 
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Criticality">
-                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" value={criticality} onChange={(e) => setCriticality(e.target.value)}>
+                <select className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white" aria-label="Criticality" value={criticality} onChange={(e) => setCriticality(e.target.value)}>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
                   <option value="high">high</option>
@@ -180,6 +162,7 @@ export default function Dashboard() {
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">This becomes normalized into Finding + Risk on the backend.</p>
         </Card>
       </div>
+      </details>
     </div>
   );
 }

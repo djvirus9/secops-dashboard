@@ -68,9 +68,12 @@ class GenericCSVParser(BaseParser):
         recommendation = self._get_field(row, headers, ["recommendation", "remediation", "fix", "solution"])
         
         return ParsedFinding(
-            title=str(title)[:200],
+            title=str(title),
             severity=Severity.normalize(severity_str) if severity_str else Severity.MEDIUM,
             tool="generic-csv",
+            source_id=self._get_field(row, headers, ["source_id", "rule_id", "id"]),
+            component=self._get_field(row, headers, ["component", "package"]),
+            component_version=self._get_field(row, headers, ["component_version", "package_version"]),
             description=str(description) if description else "",
             asset=str(asset) if asset else "unknown",
             file_path=str(file_path) if file_path else None,

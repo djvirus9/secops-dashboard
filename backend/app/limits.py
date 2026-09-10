@@ -30,13 +30,12 @@ class RequestBodyLimitMiddleware:
         receive: Callable[[], Awaitable[dict[str, Any]]],
         send: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
-        if scope.get("type") != "http" or scope.get("path") != "/import/scan":
+        if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
 
-        limit = positive_int_setting(
-            "MAX_IMPORT_REQUEST_BYTES", DEFAULT_IMPORT_REQUEST_BYTES
-        )
+        is_import = scope.get("path") == "/import/scan"
+        limit = positive_int_setting("MAX_IMPORT_REQUEST_BYTES", DEFAULT_IMPORT_REQUEST_BYTES) if is_import else positive_int_setting("MAX_REQUEST_BYTES", 1024 * 1024)
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         content_length = headers.get(b"content-length")
         if content_length:
@@ -49,7 +48,7 @@ class RequestBodyLimitMiddleware:
             declared_length = int(content_length)
             if declared_length > limit:
                 response = JSONResponse(
-                    {"detail": f"Import request exceeds the {limit}-byte limit"},
+                    {"detail": f"Request exceeds the {limit}-byte limit"},
                     status_code=413,
                 )
                 await response(scope, receive, send)
@@ -65,7 +64,7 @@ class RequestBodyLimitMiddleware:
                 received += len(message.get("body", b""))
                 if received > limit:
                     response = JSONResponse(
-                        {"detail": f"Import request exceeds the {limit}-byte limit"},
+                        {"detail": f"Request exceeds the {limit}-byte limit"},
                         status_code=413,
                     )
                     await response(scope, receive, send)

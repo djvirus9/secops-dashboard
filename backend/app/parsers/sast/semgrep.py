@@ -55,6 +55,7 @@ class SemgrepParser(BaseParser):
                 title=result.get("check_id", "Unknown Check"),
                 severity=Severity.normalize(severity_str),
                 tool="semgrep",
+                source_id=result.get("check_id"),
                 description=extra.get("message", ""),
                 asset=result.get("path", "unknown"),
                 file_path=result.get("path"),

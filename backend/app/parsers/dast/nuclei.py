@@ -4,6 +4,14 @@ from typing import List, Optional
 from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
 
 
+def load_nuclei_records(content: str) -> list:
+    try:
+        document = json.loads(content)
+        return document if isinstance(document, list) else [document]
+    except json.JSONDecodeError:
+        return [json.loads(line) for line in content.splitlines() if line.strip()]
+
+
 @ParserRegistry.register
 class NucleiParser(BaseParser):
     name = "nuclei"
@@ -15,29 +23,18 @@ class NucleiParser(BaseParser):
     @classmethod
     def can_parse(cls, content: str, filename: Optional[str] = None) -> bool:
         try:
-            lines = content.strip().split("\n")
-            for line in lines[:5]:
-                if line.strip():
-                    data = json.loads(line)
-                    if "template-id" in data or "templateID" in data or "template" in data:
-                        return True
-            return False
+            records = load_nuclei_records(content)
+            return bool(records) and all(
+                isinstance(data, dict) and any(key in data for key in ("template-id", "templateID", "template"))
+                for data in records[:5]
+            )
         except:
             return False
     
     def parse(self, content: str, filename: Optional[str] = None) -> List[ParsedFinding]:
         findings = []
         
-        lines = content.strip().split("\n")
-        for line in lines:
-            if not line.strip():
-                continue
-            
-            try:
-                result = json.loads(line)
-            except:
-                continue
-            
+        for result in load_nuclei_records(content):
             template_id = result.get("template-id") or result.get("templateID") or result.get("template", "unknown")
             info = result.get("info", {})
             
@@ -74,6 +71,8 @@ class NucleiParser(BaseParser):
                 title=info.get("name", template_id),
                 severity=Severity.normalize(severity_str),
                 tool="nuclei",
+                source_id=template_id,
+                component=result.get("matched-at", result.get("url")),
                 description=info.get("description", ""),
                 asset=host,
                 cve_id=cve_id,
