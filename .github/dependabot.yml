@@ -4,6 +4,10 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    # Match the default Node LTS runtime; promote runtime and types together.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       frontend-minor-and-patch:
         patterns: ["*"]
