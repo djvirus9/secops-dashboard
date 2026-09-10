@@ -44,7 +44,7 @@ def running_state() -> dict:
     state = read_json(LOCAL / "run.json")
     if not state:
         return {}
-    result = subprocess.run(["ps", "-p", str(state["pid"]), "-o", "command="],
+    result = subprocess.run(["ps", "-ww", "-p", str(state["pid"]), "-o", "command="],
                             capture_output=True, text=True)
     # A PID alone is insufficient: never signal an unrelated process after reuse.
     expected = f"{SCRIPT} _serve {state['run_id']} "
