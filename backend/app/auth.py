@@ -49,7 +49,7 @@ async def api_key_middleware(request: Request, call_next):
 
     provided = request.headers.get("X-API-Key", "")
     ingest_key = os.environ.get("INGEST_API_KEY", "")
-    if ingest_key and secrets.compare_digest(ingest_key, admin_key):
+    if ingest_key and secrets.compare_digest(ingest_key.encode("utf-8"), admin_key.encode("utf-8")):
         logger.error("Protected request rejected because API key scopes overlap")
         return JSONResponse(
             status_code=503,
@@ -57,7 +57,7 @@ async def api_key_middleware(request: Request, call_next):
             headers={"Cache-Control": "no-store"},
         )
 
-    if provided and secrets.compare_digest(provided, admin_key):
+    if provided and secrets.compare_digest(provided.encode("utf-8"), admin_key.encode("utf-8")):
         request.state.auth_scope = "admin"
         request.state.auth_subject = (
             request.headers.get("X-SecOps-User", "").strip()[:255] or "api-admin"
@@ -69,7 +69,7 @@ async def api_key_middleware(request: Request, call_next):
         route in _INGEST_ONLY
         and ingest_key
         and provided
-        and secrets.compare_digest(provided, ingest_key)
+        and secrets.compare_digest(provided.encode("utf-8"), ingest_key.encode("utf-8"))
     ):
         request.state.auth_scope = "ingest"
         request.state.auth_subject = "scanner"

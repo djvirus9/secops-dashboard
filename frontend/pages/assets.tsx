@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import { useState } from "react";
+import { apiPost } from "../lib/api";
+import { useApiResource } from "../lib/use-api-resource";
+import { ErrorNotice, Pagination } from "../components/feedback";
 
 type Asset = {
   id: string;
   key: string;
+  project?: string;
   name: string;
   environment: string;
   owner: string;
@@ -20,6 +23,7 @@ type AssetsResponse = {
 
 const defaultForm = {
   key: "",
+  project: "",
   name: "",
   environment: "prod",
   owner: "",
@@ -28,33 +32,28 @@ const defaultForm = {
 };
 
 export default function Assets() {
-  const [data, setData] = useState<AssetsResponse | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState({ q: "", project: "" });
+  const [filters, setFilters] = useState(search);
+  const { data, error, loading, reload: loadAssets } = useApiResource<AssetsResponse>("/assets", { ...filters, offset, limit: 50 });
   const [err, setErr] = useState<string>("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const loadAssets = () => {
-    apiGet<AssetsResponse>("/assets")
-      .then(setData)
-      .catch((e) => setErr(String(e?.message || e)));
-  };
-
-  useEffect(() => {
-    loadAssets();
-  }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.key.trim()) return;
 
     setSaving(true);
+    setErr("");
     try {
       await apiPost("/assets/upsert", form);
       setForm(defaultForm);
       setShowForm(false);
       setEditingId(null);
+      setOffset(0);
       loadAssets();
     } catch (err: any) {
       setErr(err?.message || "Failed to save asset");
@@ -64,8 +63,10 @@ export default function Assets() {
   };
 
   const editAsset = (asset: Asset) => {
+    setErr("");
     setForm({
       key: asset.key,
+      project: asset.project || "",
       name: asset.name,
       environment: asset.environment,
       owner: asset.owner,
@@ -77,6 +78,7 @@ export default function Assets() {
   };
 
   const cancelEdit = () => {
+    setErr("");
     setForm(defaultForm);
     setShowForm(false);
     setEditingId(null);
@@ -95,7 +97,7 @@ export default function Assets() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Assets</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -103,18 +105,22 @@ export default function Assets() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => { if (showForm) cancelEdit(); else { setForm(defaultForm); setEditingId(null); setErr(""); setShowForm(true); } }}
+          disabled={saving}
           className="rounded-lg bg-black dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-black hover:opacity-80 transition-opacity"
         >
           {showForm ? "Cancel" : "Add Asset"}
         </button>
       </div>
 
-      {err && (
-        <div className="rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-gray-900 dark:text-white">
-          {err}
-        </div>
-      )}
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); setOffset(0); setFilters({ ...search }); }}>
+        <label className="grid gap-1 text-sm">Search assets<input className="input" value={search.q} onChange={(event) => setSearch({ ...search, q: event.target.value })} /></label>
+        <label className="grid gap-1 text-sm">Filter by project<input className="input" value={search.project} onChange={(event) => setSearch({ ...search, project: event.target.value })} /></label>
+        <button className="button-secondary" type="submit">Search</button>
+        <button className="button-secondary" type="button" onClick={loadAssets} disabled={loading}>Refresh</button>
+      </form>
+      <ErrorNotice message={error} retry={loadAssets} />
+      <ErrorNotice message={err} />
 
       {showForm && (
         <form onSubmit={handleSubmit} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
@@ -131,6 +137,9 @@ export default function Assets() {
                 className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 disabled={!!editingId}
               />
+            </Field>
+            <Field label="Project">
+              <input className="input" value={form.project} disabled={!!editingId} onChange={(event) => setForm({ ...form, project: event.target.value })} placeholder="e.g., payments-api" />
             </Field>
             <Field label="Display Name">
               <input
@@ -152,6 +161,7 @@ export default function Assets() {
             </Field>
             <Field label="Environment">
               <select
+                aria-label="Environment"
                 value={form.environment}
                 onChange={(e) => setForm({ ...form, environment: e.target.value })}
                 className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -164,6 +174,7 @@ export default function Assets() {
             </Field>
             <Field label="Criticality">
               <select
+                aria-label="Criticality"
                 value={form.criticality}
                 onChange={(e) => setForm({ ...form, criticality: e.target.value })}
                 className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -175,6 +186,7 @@ export default function Assets() {
             </Field>
             <Field label="Exposure">
               <select
+                aria-label="Exposure"
                 value={form.exposure}
                 onChange={(e) => setForm({ ...form, exposure: e.target.value })}
                 className="w-full rounded-md border dark:border-gray-600 px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -196,6 +208,7 @@ export default function Assets() {
               <button
                 type="button"
                 onClick={cancelEdit}
+                disabled={saving}
                 className="rounded-lg border dark:border-gray-600 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 Cancel
@@ -205,31 +218,31 @@ export default function Assets() {
         </form>
       )}
 
-      {!data ? (
-        <div className="text-gray-600 dark:text-gray-400">Loading...</div>
-      ) : data.results.length === 0 ? (
+      {loading && <p role="status">Loading assets…</p>}
+      {data && (data.results.length === 0 ? (
         <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center shadow-sm">
-          <p className="text-gray-600 dark:text-gray-400">No assets yet. Add your first asset or ingest signals to auto-create assets.</p>
+          <p className="text-gray-600 dark:text-gray-400">No matching assets. Change the search or add your first asset.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
           <table className="min-w-full text-sm">
+            <caption className="sr-only">Assets matching the current filters</caption>
             <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
               <tr>
-                <th className="text-left p-3">Key</th>
-                <th className="text-left p-3">Name</th>
-                <th className="text-left p-3">Owner</th>
-                <th className="text-left p-3">Environment</th>
-                <th className="text-left p-3">Criticality</th>
-                <th className="text-left p-3">Exposure</th>
-                <th className="text-left p-3">Updated</th>
-                <th className="text-left p-3"></th>
+                <th scope="col" className="text-left p-3">Project / key</th>
+                <th scope="col" className="text-left p-3">Name</th>
+                <th scope="col" className="text-left p-3">Owner</th>
+                <th scope="col" className="text-left p-3">Environment</th>
+                <th scope="col" className="text-left p-3">Criticality</th>
+                <th scope="col" className="text-left p-3">Exposure</th>
+                <th scope="col" className="text-left p-3">Updated</th>
+                <th scope="col" className="text-left p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="text-gray-900 dark:text-gray-100">
               {data.results.map((asset) => (
-                <tr key={asset.id} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750">
-                  <td className="p-3 font-mono text-sm">{asset.key}</td>
+                <tr key={asset.id} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td className="p-3 text-sm">{asset.project && <div className="font-medium">{asset.project}</div>}<span className="font-mono">{asset.key}</span></td>
                   <td className="p-3">{asset.name}</td>
                   <td className="p-3 text-gray-600 dark:text-gray-400">{asset.owner || "-"}</td>
                   <td className="p-3">
@@ -253,6 +266,8 @@ export default function Assets() {
                   <td className="p-3">
                     <button
                       onClick={() => editAsset(asset)}
+                      disabled={saving}
+                      aria-label={`Edit ${asset.name}`}
                       className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
                     >
                       Edit
@@ -263,11 +278,8 @@ export default function Assets() {
             </tbody>
           </table>
         </div>
-      )}
-
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        {data?.count || 0} asset(s) in inventory. Assets are auto-created when ingesting signals.
-      </p>
+      ))}
+      {data && <Pagination count={data.count} offset={offset} limit={50} loading={loading} onPage={setOffset} />}
     </div>
   );
 }

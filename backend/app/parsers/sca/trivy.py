@@ -30,7 +30,7 @@ class TrivyParser(BaseParser):
             target = result.get("Target", artifact_name)
             result_type = result.get("Type", "")
             
-            for vuln in result.get("Vulnerabilities", []):
+            for vuln in result.get("Vulnerabilities") or []:
                 cve_id = vuln.get("VulnerabilityID")
                 
                 cvss_score = None
@@ -59,6 +59,9 @@ class TrivyParser(BaseParser):
                     title=title,
                     severity=Severity.normalize(vuln.get("Severity", "UNKNOWN")),
                     tool="trivy",
+                    source_id=cve_id,
+                    component=pkg_name,
+                    component_version=installed or None,
                     description=vuln.get("Description", ""),
                     asset=target,
                     cve_id=cve_id,
@@ -71,11 +74,12 @@ class TrivyParser(BaseParser):
                 )
                 findings.append(finding)
             
-            for misconfig in result.get("Misconfigurations", []):
+            for misconfig in result.get("Misconfigurations") or []:
                 finding = ParsedFinding(
                     title=misconfig.get("Title", misconfig.get("ID", "Misconfiguration")),
                     severity=Severity.normalize(misconfig.get("Severity", "MEDIUM")),
                     tool="trivy",
+                    source_id=misconfig.get("ID"),
                     description=misconfig.get("Description", ""),
                     asset=target,
                     recommendation=misconfig.get("Resolution", ""),
@@ -85,11 +89,12 @@ class TrivyParser(BaseParser):
                 )
                 findings.append(finding)
             
-            for secret in result.get("Secrets", []):
+            for secret in result.get("Secrets") or []:
                 finding = ParsedFinding(
                     title=f"Secret Detected: {secret.get('RuleID', secret.get('Category', 'Unknown'))}",
                     severity=Severity.HIGH,
                     tool="trivy",
+                    source_id=secret.get("RuleID"),
                     description=secret.get("Title", ""),
                     asset=target,
                     file_path=target,

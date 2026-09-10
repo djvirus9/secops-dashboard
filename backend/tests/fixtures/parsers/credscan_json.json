@@ -1,0 +1,27 @@
+{
+  "parsers": [
+    "credscan"
+  ],
+  "filename": "scan.json",
+  "valid": [
+    {
+      "type": "Example credential",
+      "file": "app.py",
+      "line": 12
+    }
+  ],
+  "clean": [],
+  "invalid": [
+    {
+      "file": "app.py"
+    }
+  ],
+  "expected": [
+    {
+      "source_id": "Example credential",
+      "file_path": "app.py",
+      "line_number": 12,
+      "severity": "high"
+    }
+  ]
+}

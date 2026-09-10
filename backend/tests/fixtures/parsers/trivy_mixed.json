@@ -1,0 +1,23 @@
+{
+  "parsers": ["trivy"],
+  "filename": "scan.json",
+  "valid": {
+    "SchemaVersion": 2,
+    "ArtifactName": "example",
+    "Results": [{
+      "Target": "app.py",
+      "Misconfigurations": [{"ID": "AVD-1", "Title": "Misconfiguration", "Severity": "HIGH"}],
+      "Secrets": [{"RuleID": "credential-rule", "Title": "Credential", "StartLine": 12}]
+    }]
+  },
+  "clean": {
+    "SchemaVersion": 2,
+    "ArtifactName": "example",
+    "Results": [{"Target": "app.py", "Vulnerabilities": null, "Misconfigurations": [], "Secrets": null}]
+  },
+  "invalid": {"Results": [{"Secrets": [{"Title": "Credential"}]}]},
+  "expected": [
+    {"source_id": "AVD-1", "severity": "high"},
+    {"source_id": "credential-rule", "severity": "high", "file_path": "app.py", "line_number": 12, "tags": ["secrets", ""]}
+  ]
+}

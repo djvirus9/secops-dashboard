@@ -1,0 +1,62 @@
+{
+  "parsers": [
+    "trivy"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "SchemaVersion": 2,
+    "ArtifactName": "example:1",
+    "Results": [
+      {
+        "Target": "example:1",
+        "Type": "debian",
+        "Vulnerabilities": [
+          {
+            "VulnerabilityID": "CVE-2026-0001",
+            "PkgName": "lib-a",
+            "InstalledVersion": "1.0",
+            "FixedVersion": "2.0",
+            "Severity": "HIGH"
+          },
+          {
+            "VulnerabilityID": "CVE-2026-0001",
+            "PkgName": "lib-b",
+            "InstalledVersion": "1.0",
+            "FixedVersion": "2.0",
+            "Severity": "HIGH"
+          }
+        ]
+      }
+    ]
+  },
+  "clean": {
+    "SchemaVersion": 2,
+    "ArtifactName": "example:1",
+    "Results": []
+  },
+  "invalid": {
+    "Results": [
+      {
+        "Vulnerabilities": [
+          {
+            "VulnerabilityID": "CVE-2026-0001"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "CVE-2026-0001",
+      "component": "lib-a",
+      "component_version": "1.0",
+      "severity": "high"
+    },
+    {
+      "source_id": "CVE-2026-0001",
+      "component": "lib-b",
+      "component_version": "1.0",
+      "severity": "high"
+    }
+  ]
+}

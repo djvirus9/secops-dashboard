@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import { useState } from "react";
+import Link from "next/link";
+import { apiPost } from "../lib/api";
+import { useApiResource } from "../lib/use-api-resource";
+import { ErrorNotice } from "../components/feedback";
 
 type IntegrationStatus = {
   slack: {
@@ -20,6 +23,9 @@ type Parser = {
   file_types: string[];
   description: string;
   auto_detectable: boolean;
+  verification_status?: "verified" | "unverified";
+  enabled?: boolean;
+  unavailable_reason?: string | null;
 };
 
 type ParsersResponse = {
@@ -68,9 +74,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Integrations() {
-  const [status, setStatus] = useState<IntegrationStatus | null>(null);
-  const [parsers, setParsers] = useState<ParsersResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: status, error: statusError, loading: statusLoading, reload: reloadStatus } = useApiResource<IntegrationStatus>("/integrations");
+  const { data: parsers, error: parsersError, loading: parsersLoading, reload: reloadParsers } = useApiResource<ParsersResponse>("/parsers");
   const [testingSlack, setTestingSlack] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [activeTab, setActiveTab] = useState<"notifications" | "scanners" | "import">("notifications");
@@ -78,21 +83,10 @@ export default function Integrations() {
   const [scanContent, setScanContent] = useState("");
   const [selectedParser, setSelectedParser] = useState("");
   const [defaultAsset, setDefaultAsset] = useState("");
+  const [project, setProject] = useState("");
+  const [filename, setFilename] = useState("");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
-
-  useEffect(() => {
-    Promise.all([
-      apiGet<IntegrationStatus>("/integrations"),
-      apiGet<ParsersResponse>("/parsers"),
-    ])
-      .then(([intStatus, parsersData]) => {
-        setStatus(intStatus);
-        setParsers(parsersData);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
 
   const handleTestSlack = async () => {
     setTestingSlack(true);
@@ -117,6 +111,8 @@ export default function Integrations() {
         content: scanContent,
         parser: selectedParser || undefined,
         default_asset: defaultAsset || undefined,
+        project: project.trim(),
+        filename: filename || undefined,
       });
       setImportResult(result);
       if (result.ok && result.imported > 0) {
@@ -133,17 +129,14 @@ export default function Integrations() {
     ? parsers.parsers.filter(p => p.category === selectedCategory)
     : parsers?.parsers || [];
 
-  if (loading) {
-    return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Integrations</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Integration views">
           <button
             onClick={() => setActiveTab("notifications")}
+            aria-pressed={activeTab === "notifications"}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === "notifications"
                 ? "bg-indigo-600 text-white"
@@ -154,16 +147,18 @@ export default function Integrations() {
           </button>
           <button
             onClick={() => setActiveTab("scanners")}
+            aria-pressed={activeTab === "scanners"}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === "scanners"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
             }`}
           >
-            Scanners ({parsers?.count || 0})
+            Scanners{parsers ? ` (${parsers.count})` : ""}
           </button>
           <button
             onClick={() => setActiveTab("import")}
+            aria-pressed={activeTab === "import"}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === "import"
                 ? "bg-indigo-600 text-white"
@@ -175,7 +170,11 @@ export default function Integrations() {
         </div>
       </div>
 
-      {activeTab === "notifications" && (
+      <div className="flex flex-wrap gap-3 text-sm"><Link href="/imports" className="text-indigo-600 underline dark:text-indigo-400">Import history</Link><Link href="/notifications" className="text-indigo-600 underline dark:text-indigo-400">Notification delivery</Link></div>
+      <ErrorNotice message={statusError ? `Integration status unavailable: ${statusError}` : ""} retry={reloadStatus} />
+      <ErrorNotice message={parsersError ? `Scanner catalog unavailable: ${parsersError}` : ""} retry={reloadParsers} />
+      {((activeTab === "notifications" && statusLoading) || (activeTab !== "notifications" && parsersLoading)) && <p role="status">Loading configuration…</p>}
+      {activeTab === "notifications" && status && (
         <>
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Configure external integrations to receive notifications when critical or high severity findings are detected.
@@ -207,14 +206,14 @@ export default function Integrations() {
               {status?.slack.configured ? (
                 <div className="space-y-3">
                   <p className="text-sm text-green-600 dark:text-green-400">
-                    Slack webhook is configured. Notifications will be sent for critical and high severity findings.
+                    Slack webhook is configured. Critical and high severity findings queue notifications for delivery.
                   </p>
                   <button
                     onClick={handleTestSlack}
                     disabled={testingSlack}
                     className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm"
                   >
-                    {testingSlack ? "Sending..." : "Send Test Notification"}
+                    {testingSlack ? "Queueing..." : "Queue Test Notification"}
                   </button>
                   {testResult && (
                     <p className={`text-sm ${testResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
@@ -262,7 +261,7 @@ export default function Integrations() {
               {status?.jira.configured ? (
                 <div className="space-y-3">
                   <p className="text-sm text-green-600 dark:text-green-400">
-                    Jira is configured. New critical/high findings will create issues in project: <strong>{status.jira.project_key}</strong>
+                    Jira is configured. New critical/high findings queue issue creation in project: <strong>{status.jira.project_key}</strong>
                   </p>
                 </div>
               ) : (
@@ -286,10 +285,10 @@ export default function Integrations() {
         </>
       )}
 
-      {activeTab === "scanners" && (
+      {activeTab === "scanners" && parsers && (
         <>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Supported security scanners and tools. Import scan results from any of these {parsers?.count} tools.
+            Scanner catalog. Verified formats have regression fixtures; compatibility adapters require explicit server configuration before import.
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -330,6 +329,8 @@ export default function Integrations() {
                     {parser.category}
                   </span>
                 </div>
+                <p className="mb-2 text-xs font-medium">{parser.verification_status === "verified" ? "Verified" : "Compatibility adapter"}{parser.enabled === false ? " · Import disabled" : " · Import enabled"}</p>
+                {parser.unavailable_reason && <p className="mb-2 text-xs text-gray-600 dark:text-gray-400">{parser.unavailable_reason}</p>}
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{parser.description}</p>
                 <div className="flex flex-wrap gap-1">
                   {parser.file_types.map(ft => (
@@ -352,35 +353,40 @@ export default function Integrations() {
       {activeTab === "import" && (
         <>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Import scan results from any supported security tool. Paste the scan output below and we'll automatically detect the format.
+            Import results from an enabled scanner. Choose a parser or let the server detect a verified format.
           </p>
 
           <div className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm">
             <div className="space-y-4">
+              <label className="grid gap-1 text-sm">Project / repository<input className="input" value={project} onChange={(event) => setProject(event.target.value)} placeholder="e.g., payments-api" /></label>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Use the same project for later scans of the same repository. Different projects keep matching files and components separate.</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label htmlFor="scan-parser" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Parser (optional - auto-detect if empty)
                   </label>
                   <select
+                    id="scan-parser"
+                    disabled={!parsers || importing}
                     value={selectedParser}
                     onChange={(e) => setSelectedParser(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="">Auto-detect</option>
                     {parsers?.parsers.map(p => (
-                      <option key={p.name} value={p.name}>
-                        {p.display_name} ({p.category}){p.auto_detectable ? "" : " — manual only"}
+                      <option key={p.name} value={p.name} disabled={p.enabled === false}>
+                        {p.display_name} ({p.category}){p.verification_status === "verified" ? " — verified" : " — compatibility"}{p.enabled === false ? " — disabled" : p.auto_detectable ? "" : " — manual only"}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label htmlFor="scan-default-asset" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Default Asset (optional)
                   </label>
                   <input
                     type="text"
+                    id="scan-default-asset"
                     value={defaultAsset}
                     onChange={(e) => setDefaultAsset(e.target.value)}
                     placeholder="e.g., api.prod.example.com"
@@ -390,10 +396,11 @@ export default function Integrations() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label htmlFor="scan-content" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Scan Output (JSON, XML, CSV, or JSONL)
                 </label>
                 <textarea
+                  id="scan-content"
                   value={scanContent}
                   onChange={(e) => setScanContent(e.target.value)}
                   placeholder='Paste your scan results here...\n\nExamples:\n- Semgrep JSON output\n- OWASP ZAP XML/JSON\n- Trivy scan results\n- Nuclei JSONL output\n- npm audit JSON'
@@ -402,17 +409,18 @@ export default function Integrations() {
                 />
               </div>
 
-              <div className="flex items-center gap-4">
+              <label className="grid gap-1 text-sm">Original filename (optional)<input className="input" value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="results.json" /></label>
+              <div className="flex flex-wrap items-center gap-4">
                 <button
                   onClick={handleImport}
-                  disabled={importing || !scanContent.trim()}
+                  disabled={importing || !parsers || !scanContent.trim() || parsers.parsers.some((parser) => parser.name === selectedParser && parser.enabled === false)}
                   className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium"
                 >
                   {importing ? "Importing..." : "Import Scan Results"}
                 </button>
 
                 {importResult && (
-                  <div className={`flex-1 p-3 rounded-lg ${
+                  <div role={importResult.ok ? "status" : "alert"} className={`min-w-0 flex-1 p-3 rounded-lg ${
                     importResult.ok 
                       ? "bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200"
                       : "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200"

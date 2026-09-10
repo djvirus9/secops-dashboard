@@ -1,0 +1,37 @@
+{
+  "parsers": [
+    "generic-json"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "findings": [
+      {
+        "id": "rule-1",
+        "title": "Example",
+        "severity": "high",
+        "asset": "service-a",
+        "component": "lib-example",
+        "component_version": "1.0"
+      }
+    ]
+  },
+  "clean": {
+    "findings": []
+  },
+  "invalid": {
+    "findings": [
+      {
+        "severity": "high"
+      }
+    ]
+  },
+  "expected": [
+    {
+      "title": "Example",
+      "severity": "high",
+      "source_id": "rule-1",
+      "component": "lib-example",
+      "component_version": "1.0"
+    }
+  ]
+}

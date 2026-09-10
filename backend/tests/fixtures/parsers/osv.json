@@ -1,0 +1,86 @@
+{
+  "parsers": [
+    "osv-scanner"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "results": [
+      {
+        "source": {
+          "path": "go.mod"
+        },
+        "packages": [
+          {
+            "package": {
+              "name": "lib-a",
+              "version": "1.0",
+              "ecosystem": "Go"
+            },
+            "vulnerabilities": [
+              {
+                "id": "GHSA-example",
+                "aliases": [
+                  "CVE-2026-0001"
+                ],
+                "summary": "Example",
+                "database_specific": {
+                  "severity": "HIGH"
+                }
+              }
+            ]
+          },
+          {
+            "package": {
+              "name": "lib-b",
+              "version": "1.0",
+              "ecosystem": "Go"
+            },
+            "vulnerabilities": [
+              {
+                "id": "GHSA-example",
+                "aliases": [
+                  "CVE-2026-0001"
+                ],
+                "summary": "Example",
+                "database_specific": {
+                  "severity": "HIGH"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "clean": {
+    "results": []
+  },
+  "invalid": {
+    "results": [
+      {
+        "source": {},
+        "packages": [
+          {
+            "package": {
+              "name": "lib-a"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "GHSA-example",
+      "component": "lib-a",
+      "component_version": "1.0",
+      "severity": "high"
+    },
+    {
+      "source_id": "GHSA-example",
+      "component": "lib-b",
+      "component_version": "1.0",
+      "severity": "high"
+    }
+  ]
+}

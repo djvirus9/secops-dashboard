@@ -1,43 +1,30 @@
-import { useEffect, useState } from "react";
+import { useApiResource } from "../lib/use-api-resource";
+import { ErrorNotice } from "../components/feedback";
 
 type RiskRow = {
   asset: string;
+  project?: string;
   total_findings: number;
   max_risk: number;
   avg_risk: number;
 };
 
 export default function Risks() {
-  const [data, setData] = useState<{ count: number; results: RiskRow[] } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    const run = async () => {
-      try {
-        setErr(null);
-        const r = await fetch("/api/risks", { cache: "no-store" } as any);
-        const j = await r.json();
-        if (!r.ok) throw new Error(j?.detail || `HTTP ${r.status}`);
-        setData(j);
-      } catch (e: any) {
-        setErr(e?.message || "Failed to load risks");
-      }
-    };
-    run();
-  }, []);
+  const { data, error, loading, reload } = useApiResource<{ count: number; results: RiskRow[] }>("/risks");
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Risks</h1>
-      {err && <div className="rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-gray-900 dark:text-white">❌ {err}</div>}
-      {!data ? (
-        <div className="text-sm text-gray-600 dark:text-gray-400">Loading...</div>
-      ) : (
+      <ErrorNotice message={error} retry={reload} />
+      <button className="button-secondary" onClick={reload} disabled={loading}>Refresh</button>
+      {loading && <p role="status">Loading risks…</p>}
+      {data?.results.length === 0 && <p>No active findings contribute to risk.</p>}
+      {data && (
         <div className="grid gap-4">
           {data.results.map((r) => (
-            <div key={r.asset} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="font-mono text-sm text-gray-900 dark:text-white">{r.asset}</div>
+            <div key={`${r.project || ""}:${r.asset}`} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="break-all font-mono text-sm text-gray-900 dark:text-white">{r.project && `${r.project} / `}{r.asset}</div>
                 <span className="rounded-full border dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-300">max {r.max_risk}</span>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
@@ -49,7 +36,7 @@ export default function Risks() {
           ))}
         </div>
       )}
-      <p className="text-xs text-gray-500 dark:text-gray-400">Sorted by max risk, then count.</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">Active findings, sorted by highest risk.</p>
     </div>
   );
 }

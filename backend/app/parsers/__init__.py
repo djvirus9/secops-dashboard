@@ -1,5 +1,6 @@
 from .base import BaseParser, ParsedFinding, ParserRegistry
 from .registry import get_parser, list_parsers, parse_scan_results
+from .validation import ScanValidationError
 
 __all__ = [
     "BaseParser",
@@ -8,4 +9,5 @@ __all__ = [
     "get_parser",
     "list_parsers",
     "parse_scan_results",
+    "ScanValidationError",
 ]

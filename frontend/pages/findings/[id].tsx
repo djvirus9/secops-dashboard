@@ -2,6 +2,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiPatch, apiPost } from "../../lib/api";
+import { ErrorNotice } from "../../components/feedback";
 
 type Comment = {
   id: string;
@@ -18,6 +19,9 @@ type Finding = {
   title: string;
   severity: string;
   asset: string;
+  project?: string;
+  component?: string | null;
+  component_version?: string | null;
   asset_id: string | null;
   exposure: string;
   criticality: string;
@@ -38,6 +42,7 @@ type Finding = {
   last_seen: string;
   signal_id: string;
   comments: Comment[];
+  notifications?: { id: string; channel: string; status: string; last_error?: string | null }[];
 };
 
 const STATUS_OPTIONS = ["open", "investigating", "resolved", "closed"];
@@ -73,6 +78,9 @@ export default function FindingDetailPage() {
   const [finding, setFinding] = useState<Finding | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loadRevision, setLoadRevision] = useState(0);
 
   const [newStatus, setNewStatus] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
@@ -81,51 +89,69 @@ export default function FindingDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    const controller = new AbortController();
     setLoading(true);
-    apiGet<Finding>(`/findings/${id}`)
+    setErr("");
+    setActionError("");
+    setFinding(null);
+    apiGet<Finding>(`/findings/${id}`, { signal: controller.signal })
       .then((data) => {
+        if (controller.signal.aborted) return;
         setFinding(data);
         setNewStatus(data.status);
         setNewAssignee(data.assignee || "");
       })
-      .catch((e) => setErr(String(e?.message || e)))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .catch((error) => { if (!controller.signal.aborted) setErr(String(error?.message || error)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [id, loadRevision]);
+
+  const refreshActivity = async (findingId: string) => {
+    try {
+      const refreshed = await apiGet<Finding>(`/findings/${findingId}`);
+      setFinding(refreshed);
+    } catch {
+      setActionError("Saved successfully, but activity could not be refreshed. Refresh the finding to see the latest activity.");
+    }
+  };
 
   const handleUpdateFinding = async () => {
-    if (!finding) return;
+    if (!finding || saving) return;
     setSaving(true);
+    setActionError("");
+    setSuccess("");
     try {
       const updates: { status?: string; assignee?: string } = {};
       if (newStatus !== finding.status) updates.status = newStatus;
       if (newAssignee !== (finding.assignee || "")) updates.assignee = newAssignee;
-
       if (Object.keys(updates).length > 0) {
-        await apiPatch(`/findings/${finding.id}`, updates);
-        const refreshed = await apiGet<Finding>(`/findings/${finding.id}`);
-        setFinding(refreshed);
-        setNewStatus(refreshed.status);
-        setNewAssignee(refreshed.assignee || "");
+        const result = await apiPatch<{ finding: { status: string; assignee: string | null } }>(`/findings/${finding.id}`, updates);
+        setFinding({ ...finding, ...result.finding });
+        setNewStatus(result.finding.status);
+        setNewAssignee(result.finding.assignee || "");
+        setSuccess("Finding updated.");
+        await refreshActivity(finding.id);
       }
-    } catch (e: any) {
-      setErr(String(e?.message || e));
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Could not update finding");
     } finally {
       setSaving(false);
     }
   };
 
   const handleAddComment = async () => {
-    if (!finding || !newComment.trim()) return;
+    if (!finding || !newComment.trim() || saving) return;
     setSaving(true);
+    setActionError("");
+    setSuccess("");
     try {
-      await apiPost(`/findings/${finding.id}/comments`, {
-        content: newComment.trim(),
-      });
-      const refreshed = await apiGet<Finding>(`/findings/${finding.id}`);
-      setFinding(refreshed);
+      const result = await apiPost<{ comment: Comment }>(`/findings/${finding.id}/comments`, { content: newComment.trim() });
+      setFinding({ ...finding, comments: [result.comment, ...finding.comments] });
       setNewComment("");
-    } catch (e: any) {
-      setErr(String(e?.message || e));
+      setSuccess("Comment added.");
+      await refreshActivity(finding.id);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Could not add comment");
     } finally {
       setSaving(false);
     }
@@ -135,13 +161,7 @@ export default function FindingDetailPage() {
     return <div className="text-gray-600 dark:text-gray-300">Loading...</div>;
   }
 
-  if (err) {
-    return (
-      <div className="p-4 rounded bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-gray-900 dark:text-white">
-        Error: {err}
-      </div>
-    );
-  }
+  if (err) return <ErrorNotice message={err} retry={() => setLoadRevision((value) => value + 1)} />;
 
   if (!finding) {
     return <div className="text-gray-600 dark:text-gray-300">Finding not found</div>;
@@ -149,18 +169,21 @@ export default function FindingDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
+      <ErrorNotice message={actionError} />
+      {success && <p role="status" className="text-sm text-green-700 dark:text-green-300">{success}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <Link href="/findings" className="text-indigo-600 dark:text-indigo-400 hover:underline">
           &larr; Back to Findings
         </Link>
+        <button className="button-secondary" disabled={saving} onClick={() => setLoadRevision((value) => value + 1)}>Refresh finding</button>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{finding.title}</h1>
+            <h1 className="break-words text-2xl font-semibold text-gray-900 dark:text-white">{finding.title}</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {finding.tool} &middot; {finding.asset}
+              {finding.tool} &middot; {finding.project && `${finding.project} / `}{finding.asset}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -219,6 +242,7 @@ export default function FindingDetailPage() {
           </div>
         )}
 
+        {(finding.component || finding.component_version) && <p className="break-words text-sm"><strong>Component:</strong> {finding.component || "Unknown"}{finding.component_version && ` @ ${finding.component_version}`}</p>}
         {finding.description && (
           <div className="border-t pt-4 dark:border-gray-700">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Description</h2>
@@ -265,8 +289,10 @@ export default function FindingDetailPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+            <label htmlFor="finding-status" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
             <select
+              id="finding-status"
+              disabled={saving}
               value={newStatus}
               onChange={(e) => setNewStatus(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -277,9 +303,12 @@ export default function FindingDetailPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assignee</label>
+            <label htmlFor="finding-assignee" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assignee</label>
             <input
               type="text"
+              id="finding-assignee"
+              maxLength={255}
+              disabled={saving}
               value={newAssignee}
               onChange={(e) => setNewAssignee(e.target.value)}
               placeholder="e.g., john@company.com"
@@ -297,6 +326,7 @@ export default function FindingDetailPage() {
         </button>
       </div>
 
+      {Boolean(finding.notifications?.length) && <section className="rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800"><h2 className="font-semibold">Notification delivery</h2><ul className="my-3 space-y-1 text-sm">{finding.notifications?.map((delivery) => <li key={delivery.id}>{delivery.channel}: {delivery.status.replaceAll("_", " ")}</li>)}</ul><Link href="/notifications" className="text-sm text-indigo-600 underline dark:text-indigo-400">Review delivery status</Link></section>}
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Activity &amp; Comments</h2>
 
@@ -304,6 +334,9 @@ export default function FindingDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <input
               type="text"
+              aria-label="Comment"
+              maxLength={10000}
+              disabled={saving}
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="Add a comment..."
@@ -328,8 +361,8 @@ export default function FindingDetailPage() {
                 <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-sm font-medium">
                   {c.author.charAt(0).toUpperCase()}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-gray-900 dark:text-white">{c.author}</span>
                     {c.action_type === "update" && (
                       <span className="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
@@ -340,7 +373,7 @@ export default function FindingDetailPage() {
                       {new Date(c.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <p className="text-gray-700 dark:text-gray-300 text-sm mt-1">{c.content}</p>
+                  <p className="break-words text-gray-700 dark:text-gray-300 text-sm mt-1">{c.content}</p>
                 </div>
               </div>
             ))

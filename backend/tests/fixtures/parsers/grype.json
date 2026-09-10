@@ -1,0 +1,95 @@
+{
+  "parsers": [
+    "grype"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "source": {
+      "target": {
+        "userInput": "example:1"
+      }
+    },
+    "matches": [
+      {
+        "vulnerability": {
+          "id": "CVE-2026-0001",
+          "severity": "High",
+          "cvss": [
+            {
+              "version": "3.1",
+              "metrics": {
+                "baseScore": 8.1
+              }
+            }
+          ],
+          "fix": {
+            "versions": [
+              "2.0"
+            ]
+          }
+        },
+        "artifact": {
+          "name": "lib-a",
+          "version": "1.0",
+          "type": "deb"
+        }
+      },
+      {
+        "vulnerability": {
+          "id": "CVE-2026-0001",
+          "severity": "High",
+          "cvss": [
+            {
+              "version": "3.1",
+              "metrics": {
+                "baseScore": 8.1
+              }
+            }
+          ],
+          "fix": {
+            "versions": [
+              "2.0"
+            ]
+          }
+        },
+        "artifact": {
+          "name": "lib-b",
+          "version": "1.0",
+          "type": "deb"
+        }
+      }
+    ]
+  },
+  "clean": {
+    "source": {
+      "target": {
+        "userInput": "example:1"
+      }
+    },
+    "matches": []
+  },
+  "invalid": {
+    "source": {},
+    "matches": [
+      {
+        "artifact": {}
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "CVE-2026-0001",
+      "component": "lib-a",
+      "component_version": "1.0",
+      "severity": "high",
+      "cvss_score": 8.1
+    },
+    {
+      "source_id": "CVE-2026-0001",
+      "component": "lib-b",
+      "component_version": "1.0",
+      "severity": "high",
+      "cvss_score": 8.1
+    }
+  ]
+}

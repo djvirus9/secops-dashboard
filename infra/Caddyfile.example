@@ -1,0 +1,9 @@
+# Run Caddy on the Docker host and replace this hostname with your real domain.
+# Set DASHBOARD_ORIGINS=https://dashboard.example.com in .env to match.
+dashboard.example.com {
+    request_body {
+        max_size 13MB
+    }
+    reverse_proxy 127.0.0.1:5000
+    header Strict-Transport-Security "max-age=31536000"
+}

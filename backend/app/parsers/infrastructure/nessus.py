@@ -8,7 +8,7 @@ class NessusParser(BaseParser):
     name = "nessus"
     display_name = "Nessus"
     category = ScannerCategory.INFRASTRUCTURE
-    file_types = ["xml", "json", "nessus"]
+    file_types = ["xml", "nessus"]
     description = "Tenable Nessus vulnerability scanner"
 
     def can_parse(self, content: str) -> bool:
@@ -31,6 +31,8 @@ class NessusParser(BaseParser):
                                 severity=self._map_severity(severity),
                                 tool=self.name,
                                 asset=f"{host_name}:{item.get('port', '')}",
+                                source_id=item.get("pluginID"),
+                                component=f"{item.get('protocol', 'tcp')}:{item.get('port', '')}",
                                 cve=self._extract_cve(item),
                                 cvss_score=self._extract_cvss(item),
                                 raw_data={"plugin_id": item.get("pluginID"), "host": host_name}
@@ -58,7 +60,9 @@ class NessusParser(BaseParser):
         return cve_el.text if cve_el is not None else None
 
     def _extract_cvss(self, item) -> float | None:
-        cvss_el = item.find("cvss3_base_score") or item.find("cvss_base_score")
+        cvss_el = item.find("cvss3_base_score")
+        if cvss_el is None:
+            cvss_el = item.find("cvss_base_score")
         try:
             return float(cvss_el.text) if cvss_el is not None else None
         except:

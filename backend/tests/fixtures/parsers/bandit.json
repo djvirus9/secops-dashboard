@@ -1,0 +1,40 @@
+{
+  "parsers": [
+    "bandit"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "generated_at": "2026-09-10T00:00:00Z",
+    "errors": [],
+    "results": [
+      {
+        "test_id": "B999",
+        "test_name": "example",
+        "issue_severity": "HIGH",
+        "filename": "app.py",
+        "line_number": 12,
+        "issue_text": "Example"
+      }
+    ]
+  },
+  "clean": {
+    "generated_at": "2026-09-10T00:00:00Z",
+    "errors": [],
+    "results": []
+  },
+  "invalid": {
+    "results": [
+      {
+        "filename": "app.py"
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "B999",
+      "severity": "high",
+      "file_path": "app.py",
+      "line_number": 12
+    }
+  ]
+}

@@ -8,7 +8,7 @@ class WizParser(BaseParser):
     name = "wiz"
     display_name = "Wiz"
     category = ScannerCategory.CLOUD
-    file_types = ['csv', 'json']
+    file_types = ['json']
     description = "Wiz cloud security platform"
 
     @classmethod

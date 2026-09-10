@@ -50,10 +50,10 @@ def send_slack_notification_sync(
         {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Title:*\n{title}"},
-                {"type": "mrkdwn", "text": f"*Asset:*\n{asset}"},
-                {"type": "mrkdwn", "text": f"*Tool:*\n{tool}"},
-                {"type": "mrkdwn", "text": f"*Risk Score:*\n{risk_score}"},
+                {"type": "plain_text", "text": f"Title:\n{title}"[:2000]},
+                {"type": "plain_text", "text": f"Asset:\n{asset}"[:2000]},
+                {"type": "plain_text", "text": f"Tool:\n{tool}"[:2000]},
+                {"type": "plain_text", "text": f"Risk Score:\n{risk_score}"},
             ],
         },
         {
@@ -64,15 +64,18 @@ def send_slack_notification_sync(
 
     payload = {
         "text": f"{emoji} {severity.upper()}: {title} on {asset}",
+        "mrkdwn": False,
         "attachments": [{"color": color, "blocks": blocks}],
     }
 
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.post(webhook_url, json=payload)
-            return {"ok": response.status_code == 200, "status": response.status_code}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+            return {"ok": response.status_code == 200, "status": response.status_code,
+                    "retryable": response.status_code == 429 or response.status_code >= 500,
+                    "error": f"Slack returned HTTP {response.status_code}"}
+    except httpx.HTTPError:
+        return {"ok": False, "error": "Slack connection failed", "retryable": True}
 
 
 # Alias so existing imports of send_slack_notification still work

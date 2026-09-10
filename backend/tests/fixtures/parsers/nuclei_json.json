@@ -1,0 +1,29 @@
+{
+  "parsers": [
+    "nuclei"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "template-id": "example",
+    "info": {
+      "name": "Example",
+      "severity": "high"
+    },
+    "host": "https://example.test",
+    "matched-at": "https://example.test/admin"
+  },
+  "clean": [],
+  "invalid": {
+    "info": {
+      "name": "Example",
+      "severity": "high"
+    }
+  },
+  "expected": [
+    {
+      "source_id": "example",
+      "component": "https://example.test/admin",
+      "severity": "high"
+    }
+  ]
+}

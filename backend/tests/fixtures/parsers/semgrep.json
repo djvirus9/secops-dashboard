@@ -1,0 +1,44 @@
+{
+  "parsers": [
+    "semgrep"
+  ],
+  "filename": "scan.json",
+  "valid": {
+    "version": "1.0",
+    "errors": [],
+    "results": [
+      {
+        "check_id": "python.example",
+        "path": "app.py",
+        "start": {
+          "line": 12
+        },
+        "extra": {
+          "severity": "ERROR",
+          "message": "Example",
+          "metadata": {}
+        }
+      }
+    ]
+  },
+  "clean": {
+    "version": "1.0",
+    "errors": [],
+    "results": []
+  },
+  "invalid": {
+    "results": [
+      {
+        "path": "app.py"
+      }
+    ]
+  },
+  "expected": [
+    {
+      "source_id": "python.example",
+      "severity": "high",
+      "file_path": "app.py",
+      "line_number": 12
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 async function throwApiError(res: Response, method: string, path: string): Promise<never> {
   const body = await res.json().catch(() => null);
-  const detail = body && typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
+  const detail = body && typeof body.detail === "string" ? body.detail
+    : Array.isArray(body?.detail) ? body.detail.map((issue: { loc?: string[]; msg?: string }) =>
+      `${issue.loc?.slice(1).join(".") || "Request"}: ${issue.msg || "Invalid value"}`).join("; ")
+    : `HTTP ${res.status}`;
   throw new Error(`${method} ${path} failed: ${detail}`);
 }
 
@@ -14,11 +17,17 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/integrations", "/api/integrations"],
   ["/integrations/slack/test", "/api/integrations/slack/test"],
   ["/parsers", "/api/parsers"],
+  ["/health", "/api/health"],
+  ["/risks", "/api/risks"],
+  ["/imports", "/api/imports"],
+  ["/notifications", "/api/notifications"],
 ]);
 const FINDING_PATH =
   /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/comments)?$/i;
 
 function toApiUrl(path: string): string {
+  const retryPath = /^\/notifications\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/retry$/i.exec(path);
+  if (retryPath) return `/api/notifications/${encodeURIComponent(retryPath[1])}/retry`;
   const staticPath = STATIC_API_PATHS.get(path);
   if (staticPath) return staticPath;
 
@@ -32,8 +41,15 @@ function toApiUrl(path: string): string {
   return `/api/findings/${findingId}${suffix}`;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(toApiUrl(path), { cache: "no-store" });
+export type ApiQuery = Record<string, string | number | undefined>;
+
+export async function apiGet<T>(path: string, options: { query?: ApiQuery; signal?: AbortSignal } = {}): Promise<T> {
+  const query = new URLSearchParams();
+  Object.entries(options.query || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  });
+  const url = toApiUrl(path) + (query.size ? `?${query}` : "");
+  const res = await fetch(url, { cache: "no-store", signal: options.signal });
   if (!res.ok) return throwApiError(res, "GET", path);
   return res.json();
 }
