@@ -1,12 +1,13 @@
 import json
-from typing import Any
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory
+
 
 @ParserRegistry.register
 class DetectSecretsParser(BaseParser):
     name = "detect_secrets"
     display_name = "Detect-secrets"
-    category = ScannerCategory.SAST
+    category = ScannerCategory.SECRETS
     file_types = ["json"]
     description = "Yelp's detect-secrets for finding secrets in code"
 

@@ -1,12 +1,13 @@
 import json
-from typing import Any
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory
+
 
 @ParserRegistry.register
 class GitGuardianParser(BaseParser):
     name = "gitguardian"
     display_name = "GitGuardian"
-    category = ScannerCategory.SAST
+    category = ScannerCategory.SECRETS
     file_types = ["json"]
     description = "GitGuardian ggshield secrets detection"
 

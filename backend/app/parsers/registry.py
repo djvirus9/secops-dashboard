@@ -1,5 +1,7 @@
 from typing import Optional, List, Dict, Any
 
+from defusedxml.ElementTree import fromstring as parse_safe_xml
+
 from .base import BaseParser, ParsedFinding, ParserRegistry
 
 from .sast import *
@@ -41,5 +43,11 @@ def parse_scan_results(
         if not parser_class:
             raise ValueError("Could not auto-detect parser for this content")
         parser = parser_class()
+
+    if "xml" in parser.file_types and content.lstrip().startswith("<"):
+        # Validate once outside individual parser exception handlers so entity
+        # expansion and malformed XML are rejected instead of becoming a
+        # misleading successful import with zero findings.
+        parse_safe_xml(content)
     
     return ParserRegistry.parse(parser, content, filename)

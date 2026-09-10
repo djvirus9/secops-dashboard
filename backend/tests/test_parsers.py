@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from app.parsers import ParserRegistry, get_parser, parse_scan_results
+from defusedxml.common import DefusedXmlException
 
 
 def test_catch_all_json_parser_does_not_shadow_auto_detection():
@@ -72,6 +72,18 @@ def test_string_severities_from_legacy_parsers_are_normalized():
 
 
 @pytest.mark.parametrize(
+    "parser_name",
+    ["credscan", "detect_secrets", "gitguardian", "gitleaks", "noseyparker"],
+)
+def test_secret_scanners_are_classified_for_storage_redaction(parser_name):
+    parser = get_parser(parser_name)
+
+    assert parser is not None
+    assert parser.category.value == "secrets"
+    assert ParserRegistry.contains_secret_evidence(parser_name)
+
+
+@pytest.mark.parametrize(
     ("expected", "content"),
     [
         (
@@ -124,3 +136,12 @@ def test_ambiguous_specific_formats_require_explicit_parser(monkeypatch):
     with pytest.raises(ValueError, match="Ambiguous scan format"):
         ParserRegistry.auto_detect("match")
     monkeypatch.setattr(ParserRegistry, "_parsers", original)
+
+
+def test_xml_entities_are_rejected_before_parser_exception_handlers():
+    malicious_xml = """<!DOCTYPE nmaprun [
+    <!ENTITY secret "expanded-value">
+    ]><nmaprun><host><address addr="&secret;" /></host></nmaprun>"""
+
+    with pytest.raises(DefusedXmlException):
+        parse_scan_results(malicious_xml, parser_name="nmap", filename="scan.xml")

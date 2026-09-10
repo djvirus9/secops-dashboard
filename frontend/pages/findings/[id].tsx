@@ -77,7 +77,6 @@ export default function FindingDetailPage() {
   const [newStatus, setNewStatus] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
   const [newComment, setNewComment] = useState("");
-  const [commentAuthor, setCommentAuthor] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -116,11 +115,10 @@ export default function FindingDetailPage() {
   };
 
   const handleAddComment = async () => {
-    if (!finding || !newComment.trim() || !commentAuthor.trim()) return;
+    if (!finding || !newComment.trim()) return;
     setSaving(true);
     try {
       await apiPost(`/findings/${finding.id}/comments`, {
-        author: commentAuthor.trim(),
         content: newComment.trim(),
       });
       const refreshed = await apiGet<Finding>(`/findings/${finding.id}`);
@@ -303,14 +301,7 @@ export default function FindingDetailPage() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Activity &amp; Comments</h2>
 
         <div className="space-y-4 border-b dark:border-gray-700 pb-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-            <input
-              type="text"
-              value={commentAuthor}
-              onChange={(e) => setCommentAuthor(e.target.value)}
-              placeholder="Your name"
-              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <input
               type="text"
               value={newComment}
@@ -320,7 +311,7 @@ export default function FindingDetailPage() {
             />
             <button
               onClick={handleAddComment}
-              disabled={saving || !newComment.trim() || !commentAuthor.trim()}
+              disabled={saving || !newComment.trim()}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add Comment

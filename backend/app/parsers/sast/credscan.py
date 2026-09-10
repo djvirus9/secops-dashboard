@@ -1,14 +1,15 @@
-import json
 import csv
 import io
-from typing import Any
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+import json
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory
+
 
 @ParserRegistry.register
 class CredScanParser(BaseParser):
     name = "credscan"
     display_name = "CredScan"
-    category = ScannerCategory.SAST
+    category = ScannerCategory.SECRETS
     file_types = ["csv", "json"]
     description = "Microsoft CredScan for detecting credentials in code"
 

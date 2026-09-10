@@ -1,25 +1,28 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Literal, Optional
-import json
 import hashlib
+import json
 import logging
 import os
+from datetime import UTC, datetime
+from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import case, func, select, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .auth import api_key_middleware
 from .db import SessionLocal
-from .models import Signal, Finding, Asset, Comment
-from .notifications import send_slack_notification_sync, create_jira_issue_sync
-from .parsers import list_parsers, parse_scan_results, get_parser
-from .parsers.base import ScannerCategory
+from .limits import RequestBodyLimitMiddleware, positive_int_setting
+from .models import Asset, Comment, Finding, Signal
+from .notifications import create_jira_issue_sync, send_slack_notification_sync
+from .parsers import get_parser, list_parsers, parse_scan_results
+from .parsers.base import ParsedFinding, ParserRegistry, ScannerCategory
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +31,6 @@ def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 app = FastAPI(title="SecOps Dashboard API", version="0.8.0")
-
-app.middleware("http")(api_key_middleware)
 
 cors_origins = [
     origin.strip()
@@ -56,9 +57,13 @@ allowed_hosts = [
 ]
 if not allowed_hosts:
     allowed_hosts = ["localhost", "127.0.0.1", "backend", "testserver"]
+app.add_middleware(RequestBodyLimitMiddleware)
+app.middleware("http")(api_key_middleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 NOTIFY_SEVERITIES = {"critical", "high"}
+MAX_SCAN_BYTES = 10 * 1024 * 1024
+MAX_FINDINGS_PER_IMPORT = 10_000
 STORE_RAW_SCAN_DATA = os.environ.get("STORE_RAW_SCAN_DATA", "").strip().lower() in {
     "1",
     "true",
@@ -171,6 +176,172 @@ def _serialize_finding(f: Finding) -> dict:
         "last_seen": f.last_seen.isoformat() + "Z",
         "signal_id": f.signal_id,
     }
+
+
+_SENSITIVE_RAW_KEYS = {
+    "apikey",
+    "api_key",
+    "credential",
+    "credentials",
+    "diff",
+    "match",
+    "password",
+    "privatekey",
+    "raw",
+    "rawv2",
+    "secret",
+    "stringsfound",
+    "token",
+    "value",
+}
+_REDACTED_SECRET_DESCRIPTION = (
+    "A potential secret was detected. The matched value and source context "
+    "were redacted before storage."
+)
+
+
+def _collect_sensitive_values(value: object, *, sensitive: bool = False) -> set[str]:
+    values: set[str] = set()
+    if isinstance(value, dict):
+        for key, child in value.items():
+            values.update(
+                _collect_sensitive_values(
+                    child,
+                    sensitive=sensitive or str(key).lower() in _SENSITIVE_RAW_KEYS,
+                )
+            )
+    elif isinstance(value, (list, tuple, set)):
+        for child in value:
+            values.update(_collect_sensitive_values(child, sensitive=sensitive))
+    elif sensitive and value not in (None, ""):
+        text_value = str(value)
+        if len(text_value) >= 4:
+            values.add(text_value)
+    return values
+
+
+def _redact_values(text_value: Optional[str], sensitive_values: set[str]) -> Optional[str]:
+    if text_value is None:
+        return None
+    redacted = str(text_value)
+    for secret_value in sorted(sensitive_values, key=len, reverse=True):
+        redacted = redacted.replace(secret_value, "[REDACTED]")
+    return redacted
+
+
+def _sanitize_parsed_finding(finding: ParsedFinding) -> ParsedFinding:
+    if not ParserRegistry.contains_secret_evidence(finding.tool):
+        return finding
+
+    sensitive_values = _collect_sensitive_values(finding.raw_data)
+    finding.title = _redact_values(finding.title, sensitive_values) or "Secret detected"
+    finding.asset = _redact_values(finding.asset, sensitive_values) or "unknown"
+    finding.file_path = _redact_values(finding.file_path, sensitive_values)
+    finding.recommendation = _redact_values(
+        finding.recommendation, sensitive_values
+    ) or "Rotate the exposed credential and store its replacement securely."
+    finding.references = [
+        _redact_values(reference, sensitive_values) or "" for reference in finding.references
+    ]
+    finding.tags = [_redact_values(tag, sensitive_values) or "" for tag in finding.tags]
+    finding.description = _REDACTED_SECRET_DESCRIPTION
+    return finding
+
+
+def _dialect_insert(db: Session, model):
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        return postgresql_insert(model)
+    if dialect == "sqlite":
+        return sqlite_insert(model)
+    raise RuntimeError(f"Unsupported database dialect for atomic upsert: {dialect}")
+
+
+def _get_or_create_asset(
+    db: Session,
+    *,
+    key: str,
+    name: str,
+    environment: str,
+    owner: str,
+    criticality: str,
+    exposure: str,
+    now: datetime,
+) -> Asset:
+    statement = (
+        _dialect_insert(db, Asset)
+        .values(
+            key=key,
+            name=name,
+            environment=environment,
+            owner=owner,
+            criticality=criticality,
+            exposure=exposure,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=[Asset.key])
+    )
+    db.execute(statement)
+    return db.execute(select(Asset).where(Asset.key == key)).scalar_one()
+
+
+def _upsert_finding(db: Session, values: dict) -> tuple[Finding, bool, bool]:
+    fingerprint = values["fingerprint"]
+    previous_status = db.scalar(
+        select(Finding.status).where(Finding.fingerprint == fingerprint)
+    )
+    statement = _dialect_insert(db, Finding).values(**values)
+    excluded = statement.excluded
+    incoming_is_higher_risk = excluded.risk_score >= Finding.risk_score
+    statement = statement.on_conflict_do_update(
+        index_elements=[Finding.fingerprint],
+        set_={
+            "tool": excluded.tool,
+            "title": excluded.title,
+            "asset": excluded.asset,
+            "asset_id": excluded.asset_id,
+            "severity": case(
+                (incoming_is_higher_risk, excluded.severity),
+                else_=Finding.severity,
+            ),
+            "exposure": case(
+                (incoming_is_higher_risk, excluded.exposure),
+                else_=Finding.exposure,
+            ),
+            "criticality": case(
+                (incoming_is_higher_risk, excluded.criticality),
+                else_=Finding.criticality,
+            ),
+            "status": case(
+                (Finding.status.in_(["resolved", "closed"]), "open"),
+                else_=Finding.status,
+            ),
+            "risk_score": case(
+                (incoming_is_higher_risk, excluded.risk_score),
+                else_=Finding.risk_score,
+            ),
+            "occurrences": Finding.occurrences + 1,
+            "description": func.coalesce(excluded.description, Finding.description),
+            "recommendation": func.coalesce(
+                excluded.recommendation, Finding.recommendation
+            ),
+            "cwe_id": func.coalesce(excluded.cwe_id, Finding.cwe_id),
+            "cve_id": func.coalesce(excluded.cve_id, Finding.cve_id),
+            "cvss_score": func.coalesce(excluded.cvss_score, Finding.cvss_score),
+            "file_path": func.coalesce(excluded.file_path, Finding.file_path),
+            "line_number": func.coalesce(excluded.line_number, Finding.line_number),
+            "references_json": excluded.references_json,
+            "tags_json": excluded.tags_json,
+            "last_seen": excluded.last_seen,
+            "signal_id": excluded.signal_id,
+        },
+    ).returning(Finding.id)
+    finding_id = db.execute(statement).scalar_one()
+    finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one()
+    is_new = (finding.occurrences or 1) == 1
+    resurfaced = not is_new and previous_status in {"resolved", "closed"}
+    return finding, is_new, resurfaced
 
 
 # -----------------------------
@@ -306,27 +477,22 @@ def upsert_asset(payload: AssetUpsert):
     db: Session = SessionLocal()
     try:
         now = utcnow()
-        a = db.execute(select(Asset).where(Asset.key == key)).scalar_one_or_none()
-
-        if a is None:
-            a = Asset(
-                key=key,
-                name=payload.name or key,
-                environment=payload.environment or "unknown",
-                owner=payload.owner or "",
-                criticality=payload.criticality or "medium",
-                exposure=payload.exposure or "internal",
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(a)
-        else:
-            a.name = payload.name or a.name
-            a.environment = payload.environment or a.environment
-            a.owner = payload.owner or a.owner
-            a.criticality = payload.criticality or a.criticality
-            a.exposure = payload.exposure or a.exposure
-            a.updated_at = now
+        a = _get_or_create_asset(
+            db,
+            key=key,
+            name=payload.name or key,
+            environment=payload.environment or "unknown",
+            owner=payload.owner or "",
+            criticality=payload.criticality or "medium",
+            exposure=payload.exposure or "internal",
+            now=now,
+        )
+        a.name = payload.name or a.name
+        a.environment = payload.environment or a.environment
+        a.owner = payload.owner or a.owner
+        a.criticality = payload.criticality or a.criticality
+        a.exposure = payload.exposure or a.exposure
+        a.updated_at = now
 
         db.commit()
         db.refresh(a)
@@ -400,20 +566,16 @@ def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
         now = utcnow()
         asset_key = (payload.asset or "unknown").strip().lower()
 
-        asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
-        if asset is None:
-            asset = Asset(
-                key=asset_key,
-                name=asset_key,
-                environment="unknown",
-                owner="",
-                criticality=payload.criticality or "medium",
-                exposure=payload.exposure or "internal",
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(asset)
-            db.flush()
+        asset = _get_or_create_asset(
+            db,
+            key=asset_key,
+            name=asset_key,
+            environment="unknown",
+            owner="",
+            criticality=payload.criticality,
+            exposure=payload.exposure,
+            now=now,
+        )
 
         signal = Signal(tool=payload.tool, payload=json.dumps(payload.model_dump()))
         db.add(signal)
@@ -422,73 +584,45 @@ def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
         risk_score = compute_risk_score(payload.severity, payload.exposure, payload.criticality)
         fp = make_fingerprint(payload.tool, payload.title, asset_key)
 
-        existing = db.execute(select(Finding).where(Finding.fingerprint == fp)).scalars().first()
-        if existing:
-            existing.last_seen = now
-            existing.occurrences = (existing.occurrences or 1) + 1
-            existing.risk_score = max(existing.risk_score or 0, risk_score)
-            existing.signal_id = signal.id
-            existing.asset = asset_key
-            existing.asset_id = asset.id
-            existing.severity = payload.severity
-            existing.exposure = payload.exposure
-            existing.criticality = payload.criticality
-            if existing.status in {"resolved", "closed"}:
-                existing.status = "open"
-                db.add(
-                    Comment(
-                        finding_id=existing.id,
-                        author="system",
-                        content="Finding resurfaced in a later signal and was reopened",
-                        action_type="reopened",
-                        created_at=now,
-                    )
-                )
-            db.add(existing)
-            db.commit()
-
-            if payload.severity.lower() in NOTIFY_SEVERITIES:
-                background_tasks.add_task(
-                    run_notifications_sync,
-                    title=payload.title,
-                    severity=payload.severity,
-                    asset=asset_key,
-                    risk_score=existing.risk_score,
-                    finding_id=existing.id,
-                    tool=payload.tool,
-                    is_new=False,
-                    occurrences=existing.occurrences,
-                )
-
-            return {
-                "accepted": True,
-                "deduped": True,
+        finding, is_new, resurfaced = _upsert_finding(
+            db,
+            {
+                "fingerprint": fp,
+                "tool": payload.tool,
+                "title": payload.title,
+                "severity": payload.severity,
+                "asset": asset_key,
+                "asset_id": asset.id,
+                "exposure": payload.exposure,
+                "criticality": payload.criticality,
+                "status": "open",
+                "risk_score": risk_score,
+                "occurrences": 1,
+                "description": None,
+                "recommendation": None,
+                "cwe_id": None,
+                "cve_id": None,
+                "cvss_score": None,
+                "file_path": None,
+                "line_number": None,
+                "references_json": "[]",
+                "tags_json": "[]",
+                "first_seen": now,
+                "last_seen": now,
                 "signal_id": signal.id,
-                "finding_id": existing.id,
-                "risk_score": existing.risk_score,
-                "occurrences": existing.occurrences,
-                "fingerprint": existing.fingerprint,
-            }
-
-        finding = Finding(
-            fingerprint=fp,
-            tool=payload.tool,
-            title=payload.title,
-            severity=payload.severity,
-            asset=asset_key,
-            asset_id=asset.id,
-            exposure=payload.exposure,
-            criticality=payload.criticality,
-            status="open",
-            risk_score=risk_score,
-            occurrences=1,
-            first_seen=now,
-            last_seen=now,
-            signal_id=signal.id,
+            },
         )
-        db.add(finding)
+        if resurfaced:
+            db.add(
+                Comment(
+                    finding_id=finding.id,
+                    author="system",
+                    content="Finding resurfaced in a later signal and was reopened",
+                    action_type="reopened",
+                    created_at=now,
+                )
+            )
         db.commit()
-        db.refresh(finding)
 
         if payload.severity.lower() in NOTIFY_SEVERITIES:
             background_tasks.add_task(
@@ -496,20 +630,20 @@ def ingest_signal(payload: SignalIn, background_tasks: BackgroundTasks):
                 title=payload.title,
                 severity=payload.severity,
                 asset=asset_key,
-                risk_score=risk_score,
+                risk_score=finding.risk_score,
                 finding_id=finding.id,
                 tool=payload.tool,
-                is_new=True,
-                occurrences=1,
+                is_new=is_new,
+                occurrences=finding.occurrences,
             )
 
         return {
             "accepted": True,
-            "deduped": False,
+            "deduped": not is_new,
             "signal_id": signal.id,
             "finding_id": finding.id,
-            "risk_score": risk_score,
-            "occurrences": 1,
+            "risk_score": finding.risk_score,
+            "occurrences": finding.occurrences,
             "fingerprint": fp,
         }
     finally:
@@ -631,12 +765,11 @@ def update_finding(finding_id: str, payload: FindingUpdate):
 # Add comment to finding
 # -----------------------------
 class CommentIn(StrictModel):
-    author: str = Field(..., min_length=1, max_length=255, examples=["john"])
     content: str = Field(..., min_length=1, max_length=10_000, examples=["Looking into this issue"])
 
 
 @app.post("/findings/{finding_id}/comments")
-def add_comment(finding_id: str, payload: CommentIn):
+def add_comment(finding_id: str, payload: CommentIn, request: Request):
     db: Session = SessionLocal()
     try:
         finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
@@ -645,7 +778,7 @@ def add_comment(finding_id: str, payload: CommentIn):
 
         comment = Comment(
             finding_id=finding.id,
-            author=payload.author,
+            author=getattr(request.state, "auth_subject", "api-admin"),
             content=payload.content,
             action_type="comment",
             created_at=utcnow(),
@@ -843,7 +976,7 @@ class ScanImportRequest(StrictModel):
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
-    max_scan_bytes = int(os.environ.get("MAX_SCAN_BYTES", str(10 * 1024 * 1024)))
+    max_scan_bytes = positive_int_setting("MAX_SCAN_BYTES", MAX_SCAN_BYTES)
     content_size = len(payload.content.encode("utf-8"))
     if content_size > max_scan_bytes:
         raise HTTPException(
@@ -871,6 +1004,15 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
             "message": "No findings found in scan output",
         }
 
+    max_findings = positive_int_setting(
+        "MAX_FINDINGS_PER_IMPORT", MAX_FINDINGS_PER_IMPORT
+    )
+    if len(parsed_findings) > max_findings:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Parsed scan exceeds the {max_findings}-finding limit",
+        )
+
     db: Session = SessionLocal()
     try:
         now = utcnow()
@@ -878,23 +1020,20 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
         new_findings = 0
         deduplicated = 0
 
-        for pf in parsed_findings:
+        for parsed_finding in parsed_findings:
+            pf = _sanitize_parsed_finding(parsed_finding)
             asset_key = (pf.asset or payload.default_asset or "unknown").strip().lower()
 
-            asset = db.execute(select(Asset).where(Asset.key == asset_key)).scalar_one_or_none()
-            if asset is None:
-                asset = Asset(
-                    key=asset_key,
-                    name=asset_key,
-                    environment="unknown",
-                    owner="",
-                    criticality=payload.default_criticality,
-                    exposure=payload.default_exposure,
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(asset)
-                db.flush()
+            asset = _get_or_create_asset(
+                db,
+                key=asset_key,
+                name=asset_key,
+                environment="unknown",
+                owner="",
+                criticality=payload.default_criticality,
+                exposure=payload.default_exposure,
+                now=now,
+            )
 
             signal = Signal(
                 tool=pf.tool,
@@ -919,92 +1058,62 @@ def import_scan(payload: ScanImportRequest, background_tasks: BackgroundTasks):
                 cve_id=pf.cve_id,
             )
 
-            existing = db.execute(select(Finding).where(Finding.fingerprint == fp)).scalars().first()
-            if existing:
-                existing.last_seen = now
-                existing.occurrences = (existing.occurrences or 1) + 1
-                existing.risk_score = max(existing.risk_score or 0, risk_score)
-                existing.signal_id = signal.id
-                existing.severity = severity
-                existing.exposure = exposure
-                existing.criticality = criticality
-                existing.description = pf.description or existing.description
-                existing.recommendation = pf.recommendation or existing.recommendation
-                existing.cwe_id = pf.cwe_id or existing.cwe_id
-                existing.cve_id = pf.cve_id or existing.cve_id
-                existing.cvss_score = pf.cvss_score or existing.cvss_score
-                existing.file_path = pf.file_path or existing.file_path
-                existing.line_number = pf.line_number or existing.line_number
-                existing.references_json = json.dumps(pf.references or [])
-                existing.tags_json = json.dumps(pf.tags or [])
-                if existing.status in {"resolved", "closed"}:
-                    existing.status = "open"
-                    db.add(
-                        Comment(
-                            finding_id=existing.id,
-                            author="system",
-                            content="Finding resurfaced in a later scan and was reopened",
-                            action_type="reopened",
-                            created_at=now,
-                        )
+            finding, is_new, resurfaced = _upsert_finding(
+                db,
+                {
+                    "fingerprint": fp,
+                    "tool": pf.tool,
+                    "title": pf.title,
+                    "severity": severity,
+                    "asset": asset_key,
+                    "asset_id": asset.id,
+                    "exposure": exposure,
+                    "criticality": criticality,
+                    "status": "open",
+                    "risk_score": risk_score,
+                    "occurrences": 1,
+                    "first_seen": now,
+                    "last_seen": now,
+                    "signal_id": signal.id,
+                    "description": pf.description or None,
+                    "recommendation": pf.recommendation or None,
+                    "cwe_id": pf.cwe_id,
+                    "cve_id": pf.cve_id,
+                    "cvss_score": pf.cvss_score,
+                    "file_path": pf.file_path,
+                    "line_number": pf.line_number,
+                    "references_json": json.dumps(pf.references or []),
+                    "tags_json": json.dumps(pf.tags or []),
+                },
+            )
+            if resurfaced:
+                db.add(
+                    Comment(
+                        finding_id=finding.id,
+                        author="system",
+                        content="Finding resurfaced in a later scan and was reopened",
+                        action_type="reopened",
+                        created_at=now,
                     )
-                db.add(existing)
+                )
+
+            if is_new:
+                new_findings += 1
+            else:
                 deduplicated += 1
 
-                if severity in NOTIFY_SEVERITIES:
-                    background_tasks.add_task(
-                        run_notifications_sync,
-                        title=pf.title,
-                        severity=severity,
-                        asset=asset_key,
-                        risk_score=existing.risk_score,
-                        finding_id=existing.id,
-                        tool=pf.tool,
-                        is_new=False,
-                        occurrences=existing.occurrences,
-                    )
-            else:
-                finding = Finding(
-                    fingerprint=fp,
-                    tool=pf.tool,
+            if severity in NOTIFY_SEVERITIES:
+                background_tasks.add_task(
+                    run_notifications_sync,
                     title=pf.title,
                     severity=severity,
                     asset=asset_key,
-                    asset_id=asset.id,
-                    exposure=exposure,
-                    criticality=criticality,
-                    status="open",
-                    risk_score=risk_score,
-                    occurrences=1,
-                    first_seen=now,
-                    last_seen=now,
-                    signal_id=signal.id,
-                    description=pf.description or None,
-                    recommendation=pf.recommendation or None,
-                    cwe_id=pf.cwe_id,
-                    cve_id=pf.cve_id,
-                    cvss_score=pf.cvss_score,
-                    file_path=pf.file_path,
-                    line_number=pf.line_number,
-                    references_json=json.dumps(pf.references or []),
-                    tags_json=json.dumps(pf.tags or []),
+                    risk_score=finding.risk_score,
+                    finding_id=finding.id,
+                    tool=pf.tool,
+                    is_new=is_new,
+                    occurrences=finding.occurrences,
                 )
-                db.add(finding)
-                new_findings += 1
-
-                if severity in NOTIFY_SEVERITIES:
-                    db.flush()
-                    background_tasks.add_task(
-                        run_notifications_sync,
-                        title=pf.title,
-                        severity=severity,
-                        asset=asset_key,
-                        risk_score=risk_score,
-                        finding_id=finding.id,
-                        tool=pf.tool,
-                        is_new=True,
-                        occurrences=1,
-                    )
 
             imported += 1
 

@@ -1,0 +1,13 @@
+.coverage
+.env
+.env.*
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+*.db
+*.py[cod]
+*.sqlite
+*.sqlite3
+htmlcov/
+requirements-dev.txt
+tests/

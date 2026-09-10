@@ -1,8 +1,10 @@
 import re
-import xml.etree.ElementTree as ET
 from typing import List, Optional
+from xml.etree.ElementTree import Element
 
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+import defusedxml.ElementTree as ET
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory, Severity
 
 
 @ParserRegistry.register
@@ -21,7 +23,7 @@ class XanitizerParser(BaseParser):
         except Exception:
             return False
 
-    def _resolve_severity(self, finding: ET.Element) -> str:
+    def _resolve_severity(self, finding: Element) -> str:
         rating_elem = finding.find("rating")
         if rating_elem is None or not rating_elem.text:
             return "info"
@@ -39,7 +41,7 @@ class XanitizerParser(BaseParser):
             return "high"
         return "critical"
 
-    def _resolve_cwe(self, finding: ET.Element) -> Optional[int]:
+    def _resolve_cwe(self, finding: Element) -> Optional[int]:
         cwe_elem = finding.find("cweNumber")
         if cwe_elem is None or not cwe_elem.text:
             return None
@@ -51,12 +53,12 @@ class XanitizerParser(BaseParser):
         except (ValueError, TypeError):
             return None
 
-    def _get_text(self, elem: Optional[ET.Element]) -> str:
+    def _get_text(self, elem: Optional[Element]) -> str:
         if elem is None:
             return ""
         return (elem.text or "").strip()
 
-    def _generate_file_path(self, finding: ET.Element) -> Optional[str]:
+    def _generate_file_path(self, finding: Element) -> Optional[str]:
         end_node = finding.find("endNode")
         if end_node is not None and end_node.get("relativePath"):
             return end_node.get("relativePath")

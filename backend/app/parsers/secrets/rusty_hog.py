@@ -44,18 +44,16 @@ class RustyHogParser(BaseParser):
 
         for vuln in data:
             reason = vuln.get("reason", "Unknown secret")
-            strings_found = str(vuln.get("stringsFound") or "")
             file_path = vuln.get("path")
             date = vuln.get("date")
 
             description = f"\n**Reason:** {reason}"
-            description += f"\n**This string was found:** {strings_found}"
+            description += "\n**Matched value:** [REDACTED]"
 
             if scanner == "Choctaw Hog":
                 commit_msg = vuln.get("commit", "")
                 commit_hash = vuln.get("commitHash", "")
                 parent_hash = vuln.get("parent_commit_hash")
-                old_line = vuln.get("old_line_num")
                 new_line = vuln.get("new_line_num")
                 old_file_id = vuln.get("old_file_id")
                 new_file_id = vuln.get("new_file_id")
@@ -75,11 +73,10 @@ class RustyHogParser(BaseParser):
 
             elif scanner == "Duroc Hog":
                 linenum = vuln.get("linenum")
-                diff = vuln.get("diff")
                 if linenum:
                     description += f"\n**Linenum of Issue:** {linenum}"
-                if diff:
-                    description += f"\n**Diff:** {diff}"
+                if vuln.get("diff"):
+                    description += "\n**Diff:** [REDACTED]"
                 title = f"{reason} found in path {file_path}"
                 line_number = int(linenum) if linenum is not None else None
                 recommendation = "Please ensure no secret material nor confidential information is kept in clear within directories, files, and archives."

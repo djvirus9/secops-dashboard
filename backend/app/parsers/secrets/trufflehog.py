@@ -84,8 +84,6 @@ class TruffleHogParser(BaseParser):
             commit_hash = obj.get("commitHash", "")
             date = obj.get("date", "")
             branch = obj.get("branch", "")
-            strings_found = obj.get("stringsFound", [])
-
             title = f"Hard Coded {reason} in: {file_path}"
             description = f"**Commit:** {str(commit).split(chr(10))[0]}\n"
             description += f"**Commit Hash:** {commit_hash}\n"
@@ -93,7 +91,7 @@ class TruffleHogParser(BaseParser):
             description += f"**Branch:** {branch}\n"
             description += f"**Reason:** {reason}\n"
             description += f"**Path:** {file_path}\n"
-            description += "\n**Strings Found:**\n```" + "\n".join(strings_found) + "```\n"
+            description += "**Matched value:** [REDACTED]\n"
 
             severity = self._severity_v2(reason)
             key = f"{file_path}|{reason}"

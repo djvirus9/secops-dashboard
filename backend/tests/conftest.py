@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-
-TEST_DATABASE = Path(tempfile.gettempdir()) / f"secops-dashboard-tests-{os.getpid()}.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DATABASE}"
+configured_database = os.environ.get("TEST_DATABASE_URL")
+TEST_DATABASE = None
+if configured_database:
+    os.environ["DATABASE_URL"] = configured_database
+else:
+    TEST_DATABASE = Path(tempfile.gettempdir()) / f"secops-dashboard-tests-{os.getpid()}.db"
+    os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DATABASE}"
 os.environ["API_KEY"] = "test-api-key"
+os.environ["INGEST_API_KEY"] = "test-ingest-api-key"
 os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 os.environ.pop("ALLOW_INSECURE_NO_AUTH", None)
 
@@ -37,5 +42,11 @@ def auth_headers():
     return {"X-API-Key": "test-api-key"}
 
 
+@pytest.fixture
+def ingest_headers():
+    return {"X-API-Key": "test-ingest-api-key"}
+
+
 def pytest_sessionfinish(session, exitstatus):
-    TEST_DATABASE.unlink(missing_ok=True)
+    if TEST_DATABASE:
+        TEST_DATABASE.unlink(missing_ok=True)

@@ -116,6 +116,7 @@ export function proxy(request: NextRequest): NextResponse {
 
   const headers = new Headers(request.headers);
   headers.set("X-API-Key", apiKey);
+  headers.set("X-SecOps-User", expectedUser);
   headers.delete("authorization");
   headers.delete("host");
 

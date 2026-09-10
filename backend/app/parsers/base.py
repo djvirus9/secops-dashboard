@@ -161,6 +161,11 @@ class ParserRegistry:
     def get(cls, name: str) -> Optional[Type[BaseParser]]:
         return cls._parsers.get(name)
 
+    @classmethod
+    def contains_secret_evidence(cls, name: str) -> bool:
+        parser_class = cls.get(name)
+        return bool(parser_class and parser_class.category == ScannerCategory.SECRETS)
+
     @staticmethod
     def _can_parse(
         parser_class: Type[BaseParser], content: str, filename: Optional[str] = None

@@ -32,13 +32,11 @@ class GitleaksParser(BaseParser):
             file_path = result.get("File") or result.get("file", "unknown")
             line = result.get("StartLine") or result.get("line")
             
-            secret_preview = result.get("Secret", "")[:20] + "..." if result.get("Secret") else ""
-            
             finding = ParsedFinding(
                 title=f"Secret Detected: {rule_id}",
                 severity=Severity.HIGH,
                 tool="gitleaks",
-                description=f"{description}. Partial match: {secret_preview}",
+                description=f"{description}. Matched value: [REDACTED]",
                 asset=file_path,
                 file_path=file_path,
                 line_number=line,

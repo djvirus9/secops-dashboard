@@ -18,6 +18,11 @@ authentication. The frontend proxies `/api/*` requests to the backend and adds
 the backend API key server-side, so the key is never included in browser code.
 Use TLS in every non-local deployment.
 
+`API_KEY` has full administrative access and must only be provided to the
+frontend proxy and trusted operators. Scanners should receive the separate
+`INGEST_API_KEY`, which is accepted only by `POST /ingest/signal` and
+`POST /import/scan`. Generate different random values for the two keys.
+
 The backend fails closed when `API_KEY` is missing. For isolated local
 development only, authentication can be disabled explicitly with
 `ALLOW_INSECURE_NO_AUTH=true`.
@@ -27,6 +32,9 @@ include live credentials and source snippets. Set `STORE_RAW_SCAN_DATA=true`
 only when database encryption, access control, backups, and retention are
 appropriate for that data.
 
+Known secret-scanner results are additionally redacted before normalized
+descriptions are stored or sent to notification integrations.
+
 ## Run with Docker Compose
 
 Requirements: Docker with Compose v2.
@@ -34,6 +42,7 @@ Requirements: Docker with Compose v2.
 ```bash
 cp .env.example .env
 openssl rand -hex 32  # use for API_KEY
+openssl rand -hex 32  # use a different value for INGEST_API_KEY
 openssl rand -base64 32  # use for POSTGRES_PASSWORD and DASHBOARD_PASSWORD
 docker compose --env-file .env -f infra/docker-compose.yml up --build
 ```
@@ -49,6 +58,7 @@ Create a PostgreSQL database or use SQLite, then export the required settings:
 ```bash
 export DATABASE_URL=sqlite:///./secops.db
 export API_KEY="$(openssl rand -hex 32)"
+export INGEST_API_KEY="$(openssl rand -hex 32)"
 export DASHBOARD_USERNAME=admin
 export DASHBOARD_PASSWORD="$(openssl rand -base64 32)"
 export BACKEND_URL=http://localhost:8000
@@ -95,11 +105,18 @@ npm audit --audit-level=high
 - `GET /docs` — authenticated OpenAPI documentation
 
 All endpoints except `/health` and `/ready` require `X-API-Key` when called
-directly. Normal browser traffic should use the authenticated frontend proxy.
+directly. Use `INGEST_API_KEY` for the two ingestion endpoints and `API_KEY` for
+administrative endpoints. Normal browser traffic should use the authenticated
+frontend proxy.
 
 ## Important configuration
 
 See [.env.example](.env.example) for every setting. In production, customize
 `ALLOWED_HOSTS` for the backend hostnames used by the proxy, keep
-`ALLOW_INSECURE_NO_AUTH=false`, and rotate the API key and dashboard password
-regularly.
+`ALLOW_INSECURE_NO_AUTH=false`, and rotate both API keys and the dashboard
+password regularly.
+
+Imports have three independent controls: `MAX_IMPORT_REQUEST_BYTES` limits the
+HTTP request before JSON validation, `MAX_SCAN_BYTES` limits decoded scanner
+content, and `MAX_FINDINGS_PER_IMPORT` limits database work. XML inputs reject
+DTD and entity expansion.

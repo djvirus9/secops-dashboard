@@ -1,6 +1,6 @@
 import csv
 import io
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from typing import List, Optional
 
 from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry

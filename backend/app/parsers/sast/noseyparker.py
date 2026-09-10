@@ -1,12 +1,13 @@
 import json
-from typing import Any
-from ..base import BaseParser, ParsedFinding, Severity, ScannerCategory, ParserRegistry
+
+from ..base import BaseParser, ParsedFinding, ParserRegistry, ScannerCategory
+
 
 @ParserRegistry.register
 class NoseyParkerParser(BaseParser):
     name = "noseyparker"
     display_name = "Nosey Parker"
-    category = ScannerCategory.SAST
+    category = ScannerCategory.SECRETS
     file_types = ["json", "jsonl"]
     description = "Praetorian Nosey Parker secrets scanner"
 
@@ -30,7 +31,7 @@ class NoseyParkerParser(BaseParser):
                     for match in matches:
                         findings.append(ParsedFinding(
                             title=f"Secret Found: {match.get('rule_name', data.get('rule_name', 'Unknown'))}",
-                            description=match.get("snippet", match.get("match_content", "")),
+                            description="Matched value and source context: [REDACTED]",
                             severity="high",
                             tool=self.name,
                             asset=match.get("provenance", {}).get("path", match.get("path", "unknown")),

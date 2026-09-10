@@ -11,18 +11,37 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.14"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: secops
+          POSTGRES_PASSWORD: secops-ci-password
+          POSTGRES_DB: secops_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U secops -d secops_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
     env:
-      DATABASE_URL: sqlite:///./ci.db
+      DATABASE_URL: postgresql://secops:secops-ci-password@127.0.0.1:5432/secops_ci
+      TEST_DATABASE_URL: postgresql://secops:secops-ci-password@127.0.0.1:5432/secops_ci
       API_KEY: ci-test-api-key
+      INGEST_API_KEY: ci-test-ingest-api-key
       ALLOWED_HOSTS: testserver,localhost,127.0.0.1
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt pip-audit

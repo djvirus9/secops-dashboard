@@ -33,3 +33,52 @@ def test_insecure_no_auth_requires_explicit_opt_in(client, monkeypatch):
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.setenv("ALLOW_INSECURE_NO_AUTH", "true")
     assert client.get("/findings").status_code == 200
+
+
+def test_ingest_key_is_limited_to_ingestion_routes(client, ingest_headers):
+    payload = {
+        "tool": "nuclei",
+        "severity": "medium",
+        "title": "Scoped ingestion test",
+        "asset": "scanner.example.test",
+    }
+
+    assert client.post(
+        "/ingest/signal", headers=ingest_headers, json=payload
+    ).status_code == 200
+    assert client.get("/findings", headers=ingest_headers).status_code == 401
+    assert client.post(
+        "/assets/upsert",
+        headers=ingest_headers,
+        json={"key": "must-not-be-created.example.test"},
+    ).status_code == 401
+
+
+def test_cors_preflight_does_not_require_api_credentials(client):
+    response = client.options(
+        "/findings",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-api-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_unauthenticated_import_is_rejected_before_body_processing(client, monkeypatch):
+    monkeypatch.setenv("MAX_IMPORT_REQUEST_BYTES", "1")
+
+    response = client.post("/import/scan", json={"content": "oversized"})
+
+    assert response.status_code == 401
+
+
+def test_admin_and_ingest_keys_must_be_distinct(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("INGEST_API_KEY", "test-api-key")
+
+    response = client.get("/findings", headers=auth_headers)
+
+    assert response.status_code == 503
