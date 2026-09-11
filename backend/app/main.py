@@ -7,9 +7,9 @@ import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -22,11 +22,15 @@ from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .auth import api_key_middleware
+from .access import principal, project_filters, require_project, require_write, require_admin
+from .accounts import bootstrap_admin, router as accounts_router
 from .db import SessionLocal
 from .limits import RequestBodyLimitMiddleware, positive_int_setting
 from .models import Asset, Comment, Finding, Signal, ImportRun, NotificationDelivery
 from .notifications.outbox import enqueue, enqueue_finding, serialize_delivery
 from .operations import router as operations_router
+from .workflows import router as workflows_router
+from .finding_query import FindingFilters, finding_filters, finding_order
 from .parsers import get_parser, list_parsers, parse_scan_results
 from .parsers.base import ParsedFinding, ParserRegistry, ScannerCategory
 from .parsers.validation import validate_findings
@@ -41,11 +45,14 @@ def utcnow() -> datetime:
 async def lifespan(app: FastAPI):
     from .deployment import validate_backend_settings
     validate_backend_settings()
+    bootstrap_admin()
     yield
 
 
-app = FastAPI(title="SecOps Dashboard API", version="0.9.0", lifespan=lifespan)
+app = FastAPI(title="SecOps Dashboard API", version="0.2.0", lifespan=lifespan)
 app.include_router(operations_router)
+app.include_router(accounts_router)
+app.include_router(workflows_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -69,7 +76,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -425,26 +432,28 @@ def ready():
 
 
 @app.get("/dashboard/summary")
-def dashboard_summary():
+def dashboard_summary(request: Request):
     active_statuses = ["open", "investigating"]
     db: Session = SessionLocal()
     try:
-        total_findings = db.scalar(select(func.count()).select_from(Finding)) or 0
+        scope = project_filters(request, Finding.project)
+        total_findings = db.scalar(select(func.count()).select_from(Finding).where(*scope)) or 0
         active_findings = db.scalar(
-            select(func.count()).select_from(Finding).where(Finding.status.in_(active_statuses))
+            select(func.count()).select_from(Finding).where(*scope, Finding.status.in_(active_statuses))
         ) or 0
         critical_findings = db.scalar(
             select(func.count())
             .select_from(Finding)
             .where(
+                *scope,
                 Finding.status.in_(active_statuses),
                 Finding.severity == "critical",
             )
         ) or 0
-        asset_count = db.scalar(select(func.count()).select_from(Asset)) or 0
+        asset_count = db.scalar(select(func.count()).select_from(Asset).where(*project_filters(request, Asset.project))) or 0
         severity_rows = db.execute(
             select(Finding.severity, func.count(Finding.id))
-            .where(Finding.status.in_(active_statuses))
+            .where(*scope, Finding.status.in_(active_statuses))
             .group_by(Finding.severity)
         ).all()
 
@@ -474,9 +483,9 @@ def _serialize_asset(asset: Asset) -> dict:
 
 
 @app.get("/assets")
-def list_assets(limit: int = 100, offset: int = 0, q: str = "", project: Optional[str] = None):
+def list_assets(request: Request, limit: int = 100, offset: int = 0, q: str = "", project: Optional[str] = None):
     limit, offset = max(1, min(limit, 200)), max(0, offset)
-    filters = []
+    filters = project_filters(request, Asset.project)
     if q.strip():
         needle = q.strip()[:500]
         filters.append(or_(Asset.key.icontains(needle, autoescape=True),
@@ -504,7 +513,9 @@ class AssetUpsert(StrictModel):
 
 
 @app.post("/assets/upsert")
-def upsert_asset(payload: AssetUpsert):
+def upsert_asset(payload: AssetUpsert, request: Request):
+    require_write(request)
+    require_project(request, payload.project)
     key = payload.key if payload.project else payload.key.lower()
     with SessionLocal.begin() as db:
         now = utcnow()
@@ -540,7 +551,9 @@ def upsert_asset(payload: AssetUpsert):
 # Ingest (signals + findings with dedupe)
 # -----------------------------
 @app.post("/ingest/signal")
-def ingest_signal(payload: SignalIn):
+def ingest_signal(payload: SignalIn, request: Request):
+    require_write(request)
+    require_project(request, payload.project)
     with SessionLocal.begin() as db:
         now = utcnow()
         asset_key = (payload.asset or "unknown").strip()
@@ -582,28 +595,16 @@ def ingest_signal(payload: SignalIn):
 # -----------------------------
 # List findings
 # -----------------------------
+class FindingListQuery(FindingFilters):
+    limit: int = 100
+    offset: int = 0
+
+
 @app.get("/findings")
-def list_findings(
-    limit: int = 100, offset: int = 0, q: str = "", severity: Optional[SeverityValue] = None,
-    status: Optional[Literal["open", "investigating", "resolved", "closed"]] = None,
-    assignee: Optional[str] = None, tool: Optional[str] = None, project: Optional[str] = None,
-    sort: Literal["risk_desc", "last_seen_desc"] = "last_seen_desc",
-):
-    limit, offset = max(1, min(limit, 200)), max(0, offset)
-    filters = []
-    if q.strip():
-        needle = q.strip()[:500]
-        filters.append(or_(*(column.icontains(needle, autoescape=True) for column in
-                           (Finding.title, Finding.asset, Finding.cve_id, Finding.component))))
-    for column, value in ((Finding.severity, severity), (Finding.status, status),
-                          (Finding.tool, tool), (Finding.project, project)):
-        if value is not None:
-            filters.append(column == value)
-    if assignee is not None:
-        filters.append(Finding.assignee.is_(None) if assignee == "" else Finding.assignee == assignee)
-    order = [Finding.last_seen.desc(), Finding.id]
-    if sort == "risk_desc":
-        order.insert(0, Finding.risk_score.desc())
+def list_findings(request: Request, query: Annotated[FindingListQuery, Query()]):
+    limit, offset = max(1, min(query.limit, 200)), max(0, query.offset)
+    filters = project_filters(request, Finding.project) + finding_filters(query)
+    order = finding_order(query.sort)
     with SessionLocal() as db:
         rows = db.scalars(select(Finding).where(*filters).order_by(*order).offset(offset).limit(limit)).all()
         total = db.scalar(select(func.count()).select_from(Finding).where(*filters)) or 0
@@ -615,10 +616,10 @@ def list_findings(
 # Get single finding with comments
 # -----------------------------
 @app.get("/findings/{finding_id}")
-def get_finding(finding_id: str):
+def get_finding(finding_id: str, request: Request):
     db: Session = SessionLocal()
     try:
-        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project))).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
 
@@ -629,7 +630,7 @@ def get_finding(finding_id: str):
         result = _serialize_finding(finding)
         result["notifications"] = [serialize_delivery(row) for row in db.scalars(
             select(NotificationDelivery).where(NotificationDelivery.finding_id == finding_id)
-            .order_by(NotificationDelivery.created_at.desc()).limit(100))]
+            .order_by(NotificationDelivery.created_at.desc()).limit(100))] if principal(request).role == "admin" else []
         result["comments"] = [
             {
                 "id": c.id,
@@ -655,9 +656,10 @@ class FindingUpdate(StrictModel):
 
 @app.patch("/findings/{finding_id}")
 def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
+    require_write(request)
     db: Session = SessionLocal()
     try:
-        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project))).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
 
@@ -710,9 +712,10 @@ class CommentIn(StrictModel):
 
 @app.post("/findings/{finding_id}/comments")
 def add_comment(finding_id: str, payload: CommentIn, request: Request):
+    require_write(request)
     db: Session = SessionLocal()
     try:
-        finding = db.execute(select(Finding).where(Finding.id == finding_id)).scalar_one_or_none()
+        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project))).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
 
@@ -745,7 +748,7 @@ def add_comment(finding_id: str, payload: CommentIn, request: Request):
 # Risks
 # -----------------------------
 @app.get("/risks")
-def list_risks():
+def list_risks(request: Request):
     db: Session = SessionLocal()
     try:
         rows = db.execute(
@@ -757,7 +760,7 @@ def list_risks():
                 func.sum(Finding.risk_score).label("risk_sum"),
                 func.avg(Finding.risk_score).label("avg_risk"),
             )
-            .where(Finding.status.in_(["open", "investigating"]))
+            .where(*project_filters(request, Finding.project), Finding.status.in_(["open", "investigating"]))
             .group_by(Finding.project, Finding.asset)
             .order_by(func.max(Finding.risk_score).desc(), func.count().desc(), Finding.project, Finding.asset)
         ).all()
@@ -781,7 +784,7 @@ def list_risks():
 
 
 @app.get("/risks/assets")
-def risks_by_asset(limit: int = 100):
+def risks_by_asset(request: Request, limit: int = 100):
     db: Session = SessionLocal()
     try:
         rows = db.execute(
@@ -794,7 +797,8 @@ def risks_by_asset(limit: int = 100):
                 func.avg(Finding.risk_score).label("avg_risk"),
             )
             .join(Finding, Finding.asset_id == Asset.id)
-            .where(Finding.status.in_(["open", "investigating"]))
+            .where(*project_filters(request, Asset.project), *project_filters(request, Finding.project),
+                   Finding.status.in_(["open", "investigating"]))
             .group_by(Asset.project, Asset.key)
             .order_by(func.max(Finding.risk_score).desc(), func.count(Finding.id).desc(), Asset.project, Asset.key)
             .limit(max(1, min(limit, 200)))
@@ -822,7 +826,8 @@ def risks_by_asset(limit: int = 100):
 # Integrations status
 # -----------------------------
 @app.get("/integrations")
-def get_integrations_status():
+def get_integrations_status(request: Request):
+    require_admin(request)
     slack_webhook = os.environ.get("SLACK_WEBHOOK_URL")
     jira_base = os.environ.get("JIRA_BASE_URL")
     jira_email = os.environ.get("JIRA_EMAIL")
@@ -843,7 +848,8 @@ def get_integrations_status():
 
 
 @app.post("/integrations/slack/test")
-def test_slack():
+def test_slack(request: Request):
+    require_admin(request)
     if not os.environ.get("SLACK_WEBHOOK_URL"):
         raise HTTPException(status_code=400, detail="Slack is not configured")
     with SessionLocal.begin() as db:
@@ -912,6 +918,7 @@ class ScanImportRequest(StrictModel):
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, request: Request):
+    require_write(request)
     started_at = utcnow()
     timeout = positive_int_setting("IMPORT_TIMEOUT_SECONDS", 900)
     max_scan_bytes = positive_int_setting("MAX_SCAN_BYTES", MAX_SCAN_BYTES)
@@ -920,6 +927,7 @@ def import_scan(payload: ScanImportRequest, request: Request):
     # default_asset served as repository context in old clients. Preserve that
     # intent when no explicit project is supplied, independently of file paths.
     project = payload.project or payload.default_asset or ""
+    require_project(request, project)
     with SessionLocal.begin() as db:
         run = ImportRun(parser=payload.parser or "auto", filename=payload.filename,
                         project=project, actor=getattr(request.state, "auth_subject", "api-admin"),

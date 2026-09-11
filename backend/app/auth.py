@@ -6,6 +6,11 @@ import secrets
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
+
+from .access import Principal, require_admin
+from .accounts import COOKIE_NAME, require_origin, session_principal
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +35,8 @@ async def api_key_middleware(request: Request, call_next):
     """
 
     path = request.scope.get("path", "")
-    if path in _UNPROTECTED or request.method.upper() == "OPTIONS":
+    method = request.method.upper()
+    if path in _UNPROTECTED or method == "OPTIONS" or (method, path) == ("POST", "/auth/login"):
         return await call_next(request)
 
     admin_key = os.environ.get("API_KEY", "")
@@ -38,6 +44,7 @@ async def api_key_middleware(request: Request, call_next):
         if _insecure_no_auth_enabled():
             request.state.auth_scope = "insecure-development"
             request.state.auth_subject = "development"
+            request.state.principal = Principal(None, "development", "admin", None, "api")
             return await call_next(request)
 
         logger.error("Protected request rejected because API_KEY is not configured")
@@ -57,26 +64,37 @@ async def api_key_middleware(request: Request, call_next):
             headers={"Cache-Control": "no-store"},
         )
 
-    if provided and secrets.compare_digest(provided.encode("utf-8"), admin_key.encode("utf-8")):
-        request.state.auth_scope = "admin"
-        request.state.auth_subject = (
-            request.headers.get("X-SecOps-User", "").strip()[:255] or "api-admin"
-        )
-        return await call_next(request)
-
-    route = (request.method.upper(), path)
-    if (
-        route in _INGEST_ONLY
-        and ingest_key
-        and provided
-        and secrets.compare_digest(provided.encode("utf-8"), ingest_key.encode("utf-8"))
-    ):
-        request.state.auth_scope = "ingest"
-        request.state.auth_subject = "scanner"
-        return await call_next(request)
-
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "Invalid, missing, or insufficiently scoped API key"},
-        headers={"Cache-Control": "no-store"},
-    )
+    identity = None
+    if provided:
+        if secrets.compare_digest(provided.encode("utf-8"), admin_key.encode("utf-8")):
+            identity = Principal(None, "api-admin", "admin", None, "api")
+        elif (method, path) in _INGEST_ONLY and ingest_key and secrets.compare_digest(
+            provided.encode("utf-8"), ingest_key.encode("utf-8")
+        ):
+            identity = Principal(None, "scanner", "analyst", None, "scanner")
+    else:
+        token = request.cookies.get(COOKIE_NAME, "")
+        if token:
+            session = await run_in_threadpool(session_principal, token)
+            if session:
+                identity, request.state.session_id = session
+    if identity is None:
+        return JSONResponse(status_code=401, content={"detail": "Authentication required"},
+                            headers={"Cache-Control": "no-store"})
+    request.state.principal = identity
+    request.state.auth_subject = identity.username
+    request.state.auth_scope = "ingest" if identity.kind == "scanner" else identity.role
+    try:
+        if identity.kind == "user" and method not in {"GET", "HEAD", "OPTIONS"}:
+            require_origin(request)
+        if path in {"/docs", "/redoc", "/openapi.json"} or any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ("/users", "/notifications", "/integrations", "/docs")
+        ):
+            require_admin(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail},
+                            headers={"Cache-Control": "no-store"})
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response

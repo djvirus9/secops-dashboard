@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -73,6 +72,8 @@ def environment(port: int, api_port: int) -> dict[str, str]:
            "DATABASE_URL": f"sqlite:///{LOCAL / 'secops.db'}",
            "ALLOWED_HOSTS": "localhost,127.0.0.1", "BACKEND_URL": f"http://127.0.0.1:{api_port}",
            "DASHBOARD_ORIGINS": f"{origin},http://localhost:{port}",
+           "SESSION_COOKIE_SECURE": "false", "SESSION_TTL_SECONDS": "43200",
+           "SESSION_IDLE_TIMEOUT_SECONDS": "1800",
            "CORS_ORIGINS": f"{origin},http://localhost:{port}",
            "HOSTNAME": "127.0.0.1", "PORT": str(port), "NODE_ENV": "production",
            "ALLOW_INSECURE_NO_AUTH": "false", "ALLOW_UNVERIFIED_PARSERS": "false",
@@ -84,6 +85,14 @@ def environment(port: int, api_port: int) -> dict[str, str]:
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = ",".join(filter(None, (env.get(key), "127.0.0.1", "localhost", "::1")))
     return env
+
+
+def frontend_environment(env: dict[str, str]) -> dict[str, str]:
+    # The browser proxy authenticates with user cookies, not administrative keys.
+    allowed = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ",
+               "BACKEND_URL", "DASHBOARD_ORIGINS", "HOSTNAME", "PORT", "NODE_ENV",
+               "NEXT_TELEMETRY_DISABLED", "NO_PROXY", "no_proxy"}
+    return {name: value for name, value in env.items() if name in allowed}
 
 
 def request_json(url: str, *, headers: dict | None = None, body: dict | None = None):
@@ -143,7 +152,7 @@ def prepare(env: dict) -> None:
     if tuple(python_runtime[0]) < (3, 12):
         raise RuntimeError("The existing .venv uses Python older than 3.12; recreate it with a supported Python")
     dependencies_present = subprocess.run([
-        str(PYTHON), "-c", "import fastapi,sqlalchemy,psycopg2,uvicorn,alembic,defusedxml,dotenv"],
+        str(PYTHON), "-c", "import fastapi,sqlalchemy,psycopg2,uvicorn,alembic,defusedxml,dotenv,argon2"],
         capture_output=True).returncode == 0
     build_env = dict(env)
     for key in (*credentials(), "DATABASE_URL", "PGPASSWORD"):
@@ -243,7 +252,8 @@ def serve(run_id: str, port: int, api_port: int) -> None:
                 if stopping:
                     return
                 with (LOCAL / f"{name}.log").open("a") as log:
-                    children.append(subprocess.Popen(command, cwd=directory, env=env,
+                    child_env = frontend_environment(env) if name == "frontend" else env
+                    children.append(subprocess.Popen(command, cwd=directory, env=child_env,
                                                      stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT))
             state["ready"] = True
             save_json(LOCAL / "run.json", state)
@@ -285,18 +295,28 @@ def seed() -> None:
     if not state or not healthy(state):
         raise RuntimeError("Start the local dashboard before importing demo data")
     auth = credentials()
-    base = f"http://127.0.0.1:{state['port']}"
-    token = base64.b64encode(f"{auth['DASHBOARD_USERNAME']}:{auth['DASHBOARD_PASSWORD']}".encode()).decode()
-    headers = {"Authorization": f"Basic {token}", "Origin": base}
-    findings = request_json(base + "/api/findings?project=demo", headers=headers)
+    base = f"http://127.0.0.1:{state['api_port']}"
+    headers = {"X-API-Key": auth["API_KEY"]}
+    findings = request_json(base + "/findings?project=demo", headers=headers)
     if findings["count"]:
         print("Project demo already has findings; no data changed")
         return
-    result = request_json(base + "/api/import/scan", headers=headers, body={
+    result = request_json(base + "/import/scan", headers=headers, body={
         "parser": "generic-json", "filename": "demo-scan.json", "project": "demo",
         "content": (ROOT / "examples/demo-scan.json").read_text(),
     })
-    print(f"Imported {result['imported']} synthetic demo findings. Open {base}/findings")
+    print(f"Imported {result['imported']} synthetic demo findings. Open http://127.0.0.1:{state['port']}/findings")
+
+
+def reset_password(username: str) -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise RuntimeError("Run reset-password in an interactive terminal")
+    if not (LOCAL / "secops.db").is_file() or not (LOCAL / "env.json").is_file() or not PYTHON.exists():
+        raise RuntimeError("Start the local instance before recovering an account")
+    state = running_state()
+    env = environment(state.get("port", 5050), state.get("api_port", 8000))
+    subprocess.run([str(PYTHON), "-m", "app.accounts", "reset-password", "--username", username],
+                   cwd=ROOT / "backend", env=env, check=True)
 
 
 def main() -> int:
@@ -315,9 +335,11 @@ def main() -> int:
     start_parser.add_argument("--port", type=int, default=5050)
     start_parser.add_argument("--api-port", type=int, default=8000)
     for command, help_text in (("status", "Check local services"), ("stop", "Stop services and preserve data"),
-                               ("credentials", "Show the dashboard login in your terminal"),
+                               ("credentials", "Show the initial bootstrap login in your terminal"),
                                ("seed", "Import synthetic example findings once")):
         commands.add_parser(command, help=help_text)
+    recovery_parser = commands.add_parser("reset-password", help="Interactively recover a local account password")
+    recovery_parser.add_argument("--username", required=True)
     args = parser.parse_args()
     try:
         import fcntl
@@ -331,6 +353,8 @@ def main() -> int:
                 stop()
             elif args.command == "seed":
                 seed()
+            elif args.command == "reset-password":
+                reset_password(args.username)
             elif args.command == "status":
                 state = running_state()
                 if not state:
@@ -347,6 +371,7 @@ def main() -> int:
                     print(f"Run this command in your terminal to see the login, or open {LOCAL / 'env.json'}")
                 else:
                     auth = credentials()
+                    print("Initial bootstrap login; an in-app password change replaces this password.")
                     print(f"Username: {auth['DASHBOARD_USERNAME']}\nPassword: {auth['DASHBOARD_PASSWORD']}")
         return 0
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:

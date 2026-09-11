@@ -25,11 +25,12 @@ source repository does not authorize testing other people's running deployments.
 
 ## Deployment boundary
 
-The application is intended for one trusted security team per deployment. It
-uses a shared dashboard login and administrative API credential; it does not
-provide individual user identities, SSO, MFA, or per-project authorization.
-Projects organize findings and scope identity, but all administrators can
-access all projects.
+The application is intended for one trusted security team per deployment.
+Version 0.2 provides individual local accounts, roles, revocable browser sessions,
+and project grants enforced by the backend. Administrators and administrative API
+keys can access all projects. The scanner key has unrestricted project scope for
+ingestion. SSO, MFA, GitHub synchronization, and isolation between separate
+organizations are not provided. See the [threat model](docs/threat-model.md).
 
 The local helper binds services to loopback, keeps generated credentials and
 SQLite data in the Git-ignored `.local/` directory, and disables external

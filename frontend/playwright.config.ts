@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:15100',
-    httpCredentials: { username: 'reviewer', password: 'Regression-password-7S9rY2aK5qW8' },
+    storageState: { cookies: [{ name: 'secops_session', value: 'regression-session', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Strict' }], origins: [] },
     trace: 'retain-on-failure',
     launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
       ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {},

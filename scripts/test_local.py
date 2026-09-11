@@ -26,17 +26,19 @@ SPEC.loader.exec_module(local)
 
 
 class LocalHelperTests(unittest.TestCase):
-    def http_server(self, label):
+    def http_server(self, label, response=None):
         received = []
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                received.append({"path": self.path, "authorization": self.headers.get("Authorization"), "body": body})
+                received.append({"path": self.path, "authorization": self.headers.get("Authorization"),
+                                 "api_key": self.headers.get("X-API-Key"), "body": body})
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"server": label}).encode())
+                value = response(self.path, body) if response else {"server": label}
+                self.wfile.write(json.dumps(value).encode())
 
             do_POST = do_GET
 
@@ -111,6 +113,59 @@ class LocalHelperTests(unittest.TestCase):
             for key, original in (("NO_PROXY", "upper.example.invalid"), ("no_proxy", "lower.example.invalid")):
                 self.assertTrue({original, "127.0.0.1", "localhost", "::1"}.issubset(environment[key].split(",")))
             self.assertEqual(os.environ["SLACK_WEBHOOK_URL"], ambient["SLACK_WEBHOOK_URL"])
+            self.assertEqual(environment["SESSION_COOKIE_SECURE"], "false")
+            self.assertEqual(environment["DASHBOARD_ORIGINS"], "http://127.0.0.1:5050,http://localhost:5050")
+
+    def test_frontend_process_receives_no_backend_or_bootstrap_secrets(self):
+        env = {"PATH": "/synthetic/bin", "BACKEND_URL": "http://127.0.0.1:8000",
+               "DASHBOARD_ORIGINS": "http://127.0.0.1:5050", "API_KEY": "synthetic-admin",
+               "INGEST_API_KEY": "synthetic-ingest", "DASHBOARD_PASSWORD": "synthetic-bootstrap",
+               "DASHBOARD_USERNAME": "admin", "DATABASE_URL": "sqlite:///private.db",
+               "PGPASSWORD": "synthetic-postgres", "JIRA_API_TOKEN": "synthetic-jira"}
+        child = local.frontend_environment(env)
+        self.assertEqual(child, {name: env[name] for name in ("PATH", "BACKEND_URL", "DASHBOARD_ORIGINS")})
+
+    def test_seed_uses_private_backend_key_without_bootstrap_login(self):
+        backend, requests = self.http_server("backend", lambda path, body: {"imported": 8} if body else {"count": 0})
+        frontend, browser_requests = self.http_server("frontend")
+        state = {"api_port": int(backend.rsplit(":", 1)[1]), "port": int(frontend.rsplit(":", 1)[1])}
+        auth = {"API_KEY": "synthetic-private-admin-key", "DASHBOARD_USERNAME": "admin",
+                "DASHBOARD_PASSWORD": "old-password-replaced-in-dashboard"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "examples").mkdir()
+            (root / "examples/demo-scan.json").write_text('{"findings": []}')
+            with patch.object(local, "ROOT", root), patch.object(local, "running_state", return_value=state), \
+                    patch.object(local, "healthy", return_value=True), patch.object(local, "credentials", return_value=auth), \
+                    redirect_stdout(StringIO()) as output:
+                local.seed()
+            self.assertNotIn(auth["API_KEY"], output.getvalue())
+            self.assertNotIn(auth["DASHBOARD_PASSWORD"], output.getvalue())
+        self.assertEqual(browser_requests, [])
+        self.assertEqual([request["path"] for request in requests], ["/findings?project=demo", "/import/scan"])
+        self.assertTrue(all(request["api_key"] == auth["API_KEY"] and request["authorization"] is None for request in requests))
+        self.assertNotIn(auth["DASHBOARD_PASSWORD"], str(requests))
+
+    def test_password_recovery_requires_terminal_and_targets_only_local_database(self):
+        with patch.object(local.sys.stdin, "isatty", return_value=False), patch.object(local.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "interactive terminal"):
+                local.reset_password("admin")
+            run.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / ".local"
+            state.mkdir()
+            (state / "secops.db").touch()
+            (state / "env.json").write_text(json.dumps({"DASHBOARD_USERNAME": "admin", "DASHBOARD_PASSWORD": "initial",
+                                                       "API_KEY": "private-admin", "INGEST_API_KEY": "private-ingest"}))
+            python = root / "python"
+            python.touch()
+            with patch.object(local, "ROOT", root), patch.object(local, "LOCAL", state), patch.object(local, "PYTHON", python), \
+                    patch.object(local, "running_state", return_value={}), patch.object(local.sys.stdin, "isatty", return_value=True), \
+                    patch.object(local.sys.stdout, "isatty", return_value=True), patch.object(local.subprocess, "run") as run:
+                local.reset_password("admin")
+            self.assertEqual(run.call_args.args[0], [str(python), "-m", "app.accounts", "reset-password", "--username", "admin"])
+            self.assertEqual(run.call_args.kwargs["env"]["DATABASE_URL"], f"sqlite:///{state / 'secops.db'}")
 
     def test_credentials_are_private_and_persist_between_invocations(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)):

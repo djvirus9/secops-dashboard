@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, type ApiQuery } from "./api";
 
 /** Cancel superseded reads so an older filter response cannot overwrite the current page. */
-export function useApiResource<T>(path: string, query?: ApiQuery) {
+export function useApiResource<T>(path: string, query?: ApiQuery, enabled = true) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -10,6 +10,7 @@ export function useApiResource<T>(path: string, query?: ApiQuery) {
   const queryKey = JSON.stringify(query || {});
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
+    if (!enabled) { setData(null); setError(""); setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -21,6 +22,6 @@ export function useApiResource<T>(path: string, query?: ApiQuery) {
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [path, queryKey, revision]);
+  }, [path, queryKey, revision, enabled]);
   return { data, error, loading, reload };
 }

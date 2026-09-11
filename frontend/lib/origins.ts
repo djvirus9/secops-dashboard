@@ -14,7 +14,7 @@ export function dashboardOrigins(value = "http://localhost:5000"): Set<string> {
 }
 
 export function isTrustedMutation(headers: Headers, allowedOrigins: Set<string>): boolean {
-  // Basic credentials are ambient browser credentials. Require Origin even if
+  // Session cookies are ambient browser credentials. Require Origin even if
   // Fetch Metadata is absent; null/sandboxed origins and cross-site forms fail closed.
   const origin = headers.get("origin");
   if (!origin || headers.get("sec-fetch-site") === "cross-site") return false;
@@ -23,8 +23,4 @@ export function isTrustedMutation(headers: Headers, allowedOrigins: Set<string>)
   } catch {
     return false;
   }
-}
-
-export function isConfiguredSecret(value: string, minLength: number): boolean {
-  return value.trim().length >= minLength && !/(changeme|change-me|replace-me|your[-_ ]?(password|api[-_ ]?key)|example)/i.test(value);
 }

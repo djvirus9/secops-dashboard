@@ -11,7 +11,8 @@ const python = process.env.SECOPS_TEST_PYTHON || 'python3';
 const apiKey = 'integration-admin-0f2e4a6c8d1b3e5f7a9c';
 const env = { ...process.env, DATABASE_URL: `sqlite:///${databaseDir}/integration.db`, API_KEY: apiKey,
   INGEST_API_KEY: 'integration-scanner-9c7b5a3e1f8d6c4b2a0e', ALLOWED_HOSTS: '127.0.0.1,localhost',
-  CORS_ORIGINS: 'http://127.0.0.1:15110', ALLOW_INSECURE_NO_AUTH: 'false', ALLOW_UNVERIFIED_PARSERS: 'false',
+  CORS_ORIGINS: 'http://127.0.0.1:15110', DASHBOARD_ORIGINS: 'http://127.0.0.1:15110', SESSION_COOKIE_SECURE: 'false',
+  DASHBOARD_USERNAME: 'reviewer', DASHBOARD_PASSWORD: 'Integration-password-9b7f2d1e6c4a', ALLOW_INSECURE_NO_AUTH: 'false', ALLOW_UNVERIFIED_PARSERS: 'false',
   SLACK_WEBHOOK_URL: '', JIRA_BASE_URL: '', JIRA_EMAIL: '', JIRA_API_TOKEN: '', JIRA_PROJECT_KEY: '',
   STORE_RAW_SCAN_DATA: 'false', PYTHONDONTWRITEBYTECODE: '1' };
 const children = [];
@@ -50,8 +51,7 @@ try {
   await cp('.next/static', '.next/standalone/.next/static', { recursive: true });
   const frontend = spawn(process.execPath, ['.next/standalone/server.js'], {
     stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1',
-      HOSTNAME: '0.0.0.0', PORT: '15110', BACKEND_URL: 'http://127.0.0.1:15111', API_KEY: apiKey,
-      DASHBOARD_USERNAME: 'reviewer', DASHBOARD_PASSWORD: 'Integration-password-9b7f2d1e6c4a',
+      HOSTNAME: '0.0.0.0', PORT: '15110', BACKEND_URL: 'http://127.0.0.1:15111',
       DASHBOARD_ORIGINS: 'http://127.0.0.1:15110' },
   });
   children.push(frontend);

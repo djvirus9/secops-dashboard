@@ -1,15 +1,16 @@
 """Exercise the local launcher on a fresh disposable CI checkout."""
 from __future__ import annotations
 
-import base64
+from http.cookiejar import CookieJar
 import json
 import os
 from pathlib import Path
 import stat
+import secrets
 import subprocess
 import sys
 from urllib.error import HTTPError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL = ROOT / ".local"
@@ -34,22 +35,30 @@ def main() -> None:
         auth_bytes = (LOCAL / "env.json").read_bytes()
         auth = json.loads(auth_bytes)
         assert stat.S_IMODE((LOCAL / "env.json").stat().st_mode) == 0o600
-        token = base64.b64encode(f"{auth['DASHBOARD_USERNAME']}:{auth['DASHBOARD_PASSWORD']}".encode()).decode()
         base = "http://127.0.0.1:5050"
-        opener = build_opener(ProxyHandler({}))
+        cookies = CookieJar()
+        opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(cookies))
+        anonymous = build_opener(ProxyHandler({}))
 
         def request(path, *, body=None, authenticated=True, origin=base):
-            headers = {"Authorization": f"Basic {token}"} if authenticated else {}
+            headers = {}
             if body is not None:
                 headers.update({"Content-Type": "application/json", "Origin": origin})
             req = Request(base + path, headers=headers, data=json.dumps(body).encode() if body is not None else None)
             try:
-                with opener.open(req, timeout=10) as response:
+                with (opener if authenticated else anonymous).open(req, timeout=10) as response:
                     return response.status, json.load(response)
             except HTTPError as exc:
                 return exc.code, None
 
         assert request("/api/findings", authenticated=False)[0] == 401
+        assert request("/api/auth/login", body={"username": auth['DASHBOARD_USERNAME'],
+                                                "password": auth['DASHBOARD_PASSWORD']})[0] == 200
+        session = next(cookie for cookie in cookies if cookie.name == "secops_session")
+        assert session.has_nonstandard_attr("HttpOnly")
+        assert session.get_nonstandard_attr("SameSite").lower() == "strict"
+        assert not session.secure, "The disposable loopback HTTP demo needs non-Secure cookies"
+        assert request("/api/auth/me")[1]["user"]["role"] == "admin"
         for name in ("API_KEY", "INGEST_API_KEY", "DASHBOARD_PASSWORD"):
             output = run("credentials", capture=True).stdout
             assert auth[name] not in output, "Credentials must not be printed into captured logs"
@@ -68,6 +77,13 @@ def main() -> None:
         finding_id = findings["results"][0]["id"]
         message = "Local launcher persistence check"
         assert request(f"/api/findings/{finding_id}/comments", body={"content": message})[0] == 200
+        assert request("/api/auth/logout", body={}, origin="https://untrusted.invalid")[0] == 403
+        new_password = secrets.token_urlsafe(48)
+        assert request("/api/auth/password", body={"current_password": auth['DASHBOARD_PASSWORD'],
+                                                   "new_password": new_password})[0] == 200
+        assert request("/api/auth/me")[0] == 401, "Password changes must revoke the current session"
+        assert request("/api/auth/login", body={"username": auth['DASHBOARD_USERNAME'], "password": new_password})[0] == 200
+        run("seed")  # Seeding uses the private API key even after the user changes password.
         run("stop")
         stopped = subprocess.run([sys.executable, "scripts/local.py", "status"], cwd=ROOT,
                                  capture_output=True, text=True)
@@ -75,11 +91,17 @@ def main() -> None:
         run("start")
         run("status")
         assert (LOCAL / "env.json").read_bytes() == auth_bytes, "Restart must preserve credentials"
+        assert request("/api/auth/me")[0] == 200, "Live sessions must survive a service restart"
         assert request("/api/findings?project=demo")[1]["count"] == 8
         detail = request(f"/api/findings/{finding_id}")[1]
         assert any(c["content"] == message and c["author"] == "admin" for c in detail["comments"])
         assert request("/api/notifications")[1]["count"] == 0
-        print("Local quickstart passed: authentication, origin protection, demo data, isolated integrations, idempotency, restart persistence")
+        assert request("/api/auth/logout", body={})[0] == 200
+        assert request("/api/auth/me")[0] == 401
+        assert request("/api/auth/login", body={"username": auth['DASHBOARD_USERNAME'],
+                                                "password": auth['DASHBOARD_PASSWORD']})[0] == 401, "Bootstrap must not reset an existing password"
+        assert request("/api/auth/login", body={"username": auth['DASHBOARD_USERNAME'], "password": new_password})[0] == 200
+        print("Local quickstart passed: sessions, logout, origin protection, password-change/restart persistence, private seeding, isolated integrations")
     finally:
         # The guard above guarantees this state belongs to this disposable test.
         subprocess.run([sys.executable, "scripts/local.py", "stop"], cwd=ROOT, check=False)

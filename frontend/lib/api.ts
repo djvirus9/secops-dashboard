@@ -1,10 +1,14 @@
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
 async function throwApiError(res: Response, method: string, path: string): Promise<never> {
   const body = await res.json().catch(() => null);
   const detail = body && typeof body.detail === "string" ? body.detail
     : Array.isArray(body?.detail) ? body.detail.map((issue: { loc?: string[]; msg?: string }) =>
       `${issue.loc?.slice(1).join(".") || "Request"}: ${issue.msg || "Invalid value"}`).join("; ")
     : `HTTP ${res.status}`;
-  throw new Error(`${method} ${path} failed: ${detail}`);
+  if (res.status === 401 && path !== "/auth/login" && typeof window !== "undefined") window.dispatchEvent(new Event("secops:unauthorized"));
+  throw new ApiError(detail || `${method} ${path} failed`, res.status);
 }
 
 const STATIC_API_PATHS = new Map<string, string>([
@@ -21,11 +25,13 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/risks", "/api/risks"],
   ["/imports", "/api/imports"],
   ["/notifications", "/api/notifications"],
+  ...["/auth/login", "/auth/logout", "/auth/me", "/auth/password", "/users", "/saved-views", "/findings/bulk", "/findings/export.csv"].map((path): [string, string] => [path, `/api${path}`]),
 ]);
 const FINDING_PATH =
   /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/comments)?$/i;
 
 function toApiUrl(path: string): string {
+  if (/^\/(users|saved-views)\/[0-9a-f-]{36}$/i.test(path)) return `/api${path}`;
   const retryPath = /^\/notifications\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/retry$/i.exec(path);
   if (retryPath) return `/api/notifications/${encodeURIComponent(retryPath[1])}/retry`;
   const staticPath = STATIC_API_PATHS.get(path);
@@ -72,4 +78,20 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   });
   if (!res.ok) return throwApiError(res, "PATCH", path);
   return res.json();
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  const res = await fetch(toApiUrl(path), { method: "DELETE" });
+  if (!res.ok) return throwApiError(res, "DELETE", path);
+}
+export async function downloadFindings(query: ApiQuery): Promise<void> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
+  const response = await fetch(`${toApiUrl("/findings/export.csv")}?${params}`, { cache: "no-store" });
+  if (!response.ok) return throwApiError(response, "GET", "/findings/export.csv");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url; link.download = "secops-findings.csv";
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

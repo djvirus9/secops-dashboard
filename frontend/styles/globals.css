@@ -16,6 +16,7 @@
 }
 
 @layer components {
+  .button-primary { @apply rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50; }
   .skip-link { @apply sr-only; }
   .skip-link:focus {
     @apply not-sr-only rounded-lg bg-white px-4 py-2 text-gray-900 shadow-lg dark:bg-gray-800 dark:text-white;

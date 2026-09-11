@@ -1,23 +1,23 @@
 import { test, expect } from '@playwright/test';
 
-const basic = 'Basic ' + Buffer.from('reviewer:Regression-password-7S9rY2aK5qW8').toString('base64');
+const spoofedAuthorization = 'Basic ' + Buffer.from('attacker:unused').toString('base64');
 const backend = 'http://127.0.0.1:15101';
 const findingId = '00000001-1111-4111-8111-111111111111';
 
 test.beforeEach(async ({ request }) => { await request.post(`${backend}/__test/reset`, { data: {} }); });
 
 test('production proxy accepts canonical public origins without trusting forwarded hosts', async ({ request }) => {
-  const publicHeaders = { Authorization: basic, Host: 'dashboard.secops.invalid', 'X-Forwarded-Host': 'dashboard.secops.invalid', 'X-Forwarded-Proto': 'https' };
+  const publicHeaders = { Authorization: spoofedAuthorization, Host: 'dashboard.secops.invalid', Cookie: 'secops_session=regression-session', 'X-API-Key': 'untrusted-key', 'X-SecOps-User': 'attacker', 'X-Forwarded-Host': 'dashboard.secops.invalid', 'X-Forwarded-Proto': 'https' };
   expect((await request.get('/api/assets', { headers: publicHeaders })).status()).toBe(200);
   const write = await request.post('/api/assets/upsert', { headers: { ...publicHeaders, Origin: 'https://dashboard.secops.invalid' }, data: { key: 'public.invalid', project: 'fixture' } });
   expect(write.status()).toBe(200);
   const state = await (await request.get(`${backend}/__test/state`)).json();
-  expect(state.requests.at(-1)).toMatchObject({ actor: 'reviewer', hasAuthorization: false, body: { key: 'public.invalid' } });
+  expect(state.requests.at(-1)).toMatchObject({ actor: 'reviewer', hasAuthorization: false, hasApiKey: false, hasSpoofedUser: false, body: { key: 'public.invalid' } });
 });
 
 for (const origin of [null, 'null', 'https://attacker.invalid', 'https://dashboard.secops.invalid.attacker.invalid', 'https://dashboard.secops.invalid/path', 'https://dashboard.secops.invalid/', 'https://dashboard.secops.invalid:8443', 'http://0.0.0.0:15100']) {
   test(`production proxy rejects mutation Origin ${origin === null ? "missing" : origin}`, async ({ request }) => {
-    const headers: Record<string, string> = { Authorization: basic, Host: 'attacker.invalid', 'X-Forwarded-Host': 'attacker.invalid', 'X-Forwarded-Proto': 'https' };
+    const headers: Record<string, string> = { Authorization: spoofedAuthorization, Host: 'attacker.invalid', 'X-Forwarded-Host': 'attacker.invalid', 'X-Forwarded-Proto': 'https' };
     if (origin !== null) headers.Origin = origin;
     const response = await request.post('/api/assets/upsert', { headers, data: { key: 'rejected.invalid' } });
     expect(response.status()).toBe(403);
@@ -27,7 +27,7 @@ for (const origin of [null, 'null', 'https://attacker.invalid', 'https://dashboa
 }
 
 test('cross-site fetch metadata remains rejected with an allowlisted Origin', async ({ request }) => {
-  const response = await request.post('/api/assets/upsert', { headers: { Authorization: basic, Origin: 'https://dashboard.secops.invalid', 'Sec-Fetch-Site': 'cross-site' }, data: {} });
+  const response = await request.post('/api/assets/upsert', { headers: { Authorization: spoofedAuthorization, Origin: 'https://dashboard.secops.invalid', 'Sec-Fetch-Site': 'cross-site' }, data: {} });
   expect(response.status()).toBe(403);
 });
 
@@ -38,25 +38,25 @@ test('authentication and malformed deployment settings fail closed', async ({ re
     await expect.poll(async () => {
       try { return (await request.get(`http://127.0.0.1:${port}/_health`)).status(); } catch { return 0; }
     }).toBe(503);
-    expect((await request.get(`http://127.0.0.1:${port}/api/assets`, { headers: { Authorization: basic } })).status()).toBe(503);
+    expect((await request.get(`http://127.0.0.1:${port}/api/assets`, { headers: { Authorization: spoofedAuthorization } })).status()).toBe(503);
   }
 });
 
 test('findings pagination reaches records after 100 and filters reset the offset', async ({ page, request }) => {
   await page.goto('/findings');
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('51–100 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('51–100 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('101–121 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('101–121 of 121');
   await expect(page.getByRole('link', { name: 'Finding 121', exact: true })).toBeVisible();
   await page.getByLabel('Search findings').fill('Finding 1');
   await page.getByLabel('Severity', { exact: true }).selectOption('high');
   await page.getByLabel('Project', { exact: true }).fill('payments');
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect(page.getByRole('status')).toHaveText('1–33 of 33');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
   const state = await (await request.get(`${backend}/__test/state`)).json();
-  expect(state.requests.at(-1).query).toMatchObject({ offset: '0', limit: '50', q: 'Finding 1', severity: 'high', project: 'payments', sort: 'risk_desc' });
+  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings').query).toMatchObject({ offset: '0', limit: '50', q: 'Finding 1', severity: 'high', project: 'payments', sort: 'risk_desc' });
 });
 
 test('a failed finding save preserves the draft and allows a successful retry and comment', async ({ page, request }) => {
@@ -69,7 +69,7 @@ test('a failed finding save preserves the draft and allows a successful retry an
   await expect(page.getByLabel('Assignee', { exact: true })).toHaveValue('reviewer');
   await expect(page.getByRole('heading', { name: 'Finding 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Update Finding' }).click();
-  await expect(page.getByRole('status')).toHaveText('Finding updated.');
+  await expect(page.getByRole('status').filter({ hasText: /^Finding updated\.$/ })).toHaveText('Finding updated.');
   await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Comment', exact: true }).fill('Review complete');
   await page.getByRole('button', { name: 'Add Comment' }).click();
@@ -85,7 +85,7 @@ test('read failures are recoverable and integration failures preserve the scanne
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Findings temporarily unavailable');
   await expect(page.getByText('Loading findings…')).toHaveCount(0);
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.goto('/integrations');
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Integration service unavailable');
   await expect(page.getByText('Not configured', { exact: true })).toHaveCount(0);
@@ -103,9 +103,9 @@ test('read failures are recoverable and integration failures preserve the scanne
 
 test('asset pagination, cancel and create work through the authenticated browser proxy', async ({ page, request }) => {
   await page.goto('/assets');
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('51–100 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('51–100 of 121');
   await page.getByRole('button', { name: 'Edit Asset 51', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).first().click();
   await page.getByRole('button', { name: 'Add Asset', exact: true }).click();
@@ -115,7 +115,7 @@ test('asset pagination, cancel and create work through the authenticated browser
   await page.getByLabel('Key (unique identifier)', { exact: true }).fill('browser-created.invalid');
   await page.getByLabel('Project', { exact: true }).fill('browser-project');
   await page.getByRole('button', { name: 'Create Asset', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('1–50 of 122');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 122');
   const state = await (await request.get(`${backend}/__test/state`)).json();
   expect(state.assets[0]).toMatchObject({ key: 'browser-created.invalid', project: 'browser-project' });
 });
@@ -128,9 +128,9 @@ test('imports include project identity and disable unavailable parsers', async (
   await page.getByLabel('Parser (optional - auto-detect if empty)', { exact: true }).selectOption('bandit');
   await page.getByLabel('Scan Output (JSON, XML, CSV, or JSONL)', { exact: true }).fill('{"results":[]}');
   await page.getByRole('button', { name: 'Import Scan Results', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Imported fixture successfully');
+  await expect(page.getByRole('status').filter({ hasText: 'Imported fixture successfully' })).toContainText('Imported fixture successfully');
   const state = await (await request.get(`${backend}/__test/state`)).json();
-  expect(state.requests.at(-1)).toMatchObject({ path: '/import/scan', body: { project: 'payments-api', parser: 'bandit' } });
+  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/import/scan')).toMatchObject({ path: '/import/scan', body: { project: 'payments-api', parser: 'bandit' } });
 });
 
 test('mobile navigation and forms fit the viewport and retain accessible names', async ({ page }) => {
@@ -199,4 +199,164 @@ test('history shows import outcomes and ambiguous delivery retries require expli
   await expect(page.getByRole('heading', { name: 'jira · pending', exact: true })).toBeVisible();
   const state = await (await request.get(`${backend}/__test/state`)).json();
   expect(state.requests.findLast((entry: { method: string }) => entry.method === 'POST').body).toEqual({ confirmed_no_issue: true });
+});
+
+test('login validates credentials, rejects external return paths and logout revokes the session', async ({ page, context }) => {
+  await context.clearCookies();
+  await page.goto('/findings?project=payments&severity=high');
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await page.getByLabel('Username', { exact: true }).fill('reviewer');
+  await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('Invalid username or password');
+  await page.getByLabel('Password', { exact: true }).fill('Regression-password-7S9rY2aK5qW8');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/findings\?project=payments&severity=high/);
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  expect((await context.request.get('/api/auth/me')).status()).toBe(401);
+  await page.goto('/login?next=https://attacker.invalid');
+  await page.getByLabel('Username', { exact: true }).fill('reviewer');
+  await page.getByLabel('Password', { exact: true }).fill('Regression-password-7S9rY2aK5qW8');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL('http://127.0.0.1:15100/');
+});
+
+test('expired sessions return to login with findings filters intact', async ({ page, request }) => {
+  await page.goto('/findings?project=payments&q=Finding%201');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
+  await request.post(`${backend}/__test/expire`);
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await page.getByLabel('Username', { exact: true }).fill('reviewer');
+  await page.getByLabel('Password', { exact: true }).fill('Regression-password-7S9rY2aK5qW8');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByLabel('Search findings')).toHaveValue('Finding 1');
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
+});
+
+for (const returnPath of [
+  'https://attacker.invalid/path', '//attacker.invalid/path', '/\\attacker.invalid/path',
+  '/%2f%2fattacker.invalid', '/%5cattacker.invalid', '/findings/%2e%2e/%2fattacker.invalid',
+  '/findings?project=%ZZ', '/findings?project=%E0%A4%A', '/findings/------------------------------------',
+]) {
+  test(`login rejects unsafe or malformed return path ${returnPath}`, async ({ page }) => {
+    await page.goto(`/login?${new URLSearchParams({ next: returnPath })}`);
+    await expect(page).toHaveURL('http://127.0.0.1:15100/');
+  });
+}
+
+test('login return routes preserve query data and validate finding IDs separately', async ({ page }) => {
+  const filters = '/findings?project=payments&q=Finding%201&severity=high&next=https%3A%2F%2Fattacker.invalid#filters';
+  await page.goto(`/login?${new URLSearchParams({ next: filters })}`);
+  await expect(page).toHaveURL(url => url.pathname === '/findings' && url.hash === '#filters');
+  expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ project: 'payments', q: 'Finding 1', severity: 'high', next: 'https://attacker.invalid' });
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
+  await expect(page.getByLabel('Search findings')).toHaveValue('Finding 1');
+  await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('high');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
+
+  const detail = `/findings/${findingId}?id=https%3A%2F%2Fattacker.invalid&next=%2F%2Fattacker.invalid`;
+  await page.goto(`/login?${new URLSearchParams({ next: detail })}`);
+  await expect(page).toHaveURL(`http://127.0.0.1:15100/findings/${findingId}?next=%2F%2Fattacker.invalid`);
+  await expect(page.getByRole('heading', { name: 'Finding 1', exact: true })).toBeVisible();
+});
+
+test('saved views persist applied filters, support rename/delete and browser history', async ({ page }) => {
+  await page.goto('/findings?project=payments&severity=high&unknown=ignored');
+  await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('high');
+  await page.getByLabel('View name', { exact: true }).fill('My high findings');
+  await page.getByRole('button', { name: 'Save current filters' }).click();
+  await expect(page.getByText('View saved.', { exact: true })).toBeVisible();
+  await page.getByLabel('Saved view', { exact: true }).selectOption({ label: 'My high findings' });
+  await page.getByLabel('View name', { exact: true }).fill('Review queue');
+  await page.getByRole('button', { name: 'Rename selected view' }).click();
+  await expect(page.getByLabel('Saved view', { exact: true }).locator('option')).toHaveText(['Choose a view', 'Review queue']);
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('');
+  await page.goBack();
+  await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('high');
+  await page.goForward();
+  await page.getByLabel('Saved view', { exact: true }).selectOption({ label: 'Review queue' });
+  await page.getByRole('button', { name: 'Apply saved view' }).click();
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
+  await expect(page).not.toHaveURL(/unknown=/);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Delete view' }).click();
+  await expect(page.getByText('Saved view deleted.', { exact: true })).toBeVisible();
+});
+
+test('bulk updates require explicit closure confirmation, preserve failed drafts and clear page selection', async ({ page, request }) => {
+  await request.post(`${backend}/__test/reset`, { data: { failBulk: 1 } });
+  await page.goto('/findings');
+  await page.getByRole('checkbox', { name: 'Select Finding 1', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Select Finding 2', exact: true }).check();
+  await page.getByLabel('Bulk status', { exact: true }).selectOption('resolved');
+  await page.getByLabel('Assignment action').selectOption('clear');
+  const apply = page.getByRole('button', { name: 'Apply to 2 selected' });
+  await expect(apply).toBeDisabled();
+  await page.getByRole('checkbox', { name: 'Confirm marking 2 selected findings as resolved' }).check();
+  await apply.click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('Bulk update temporarily unavailable');
+  await expect(page.getByLabel('Bulk status', { exact: true })).toHaveValue('resolved');
+  await apply.click();
+  await expect(page.getByText('Updated 2 selected findings.', { exact: true })).toBeVisible();
+  const state = await (await request.get(`${backend}/__test/state`)).json();
+  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings/bulk').body).toMatchObject({ status: 'resolved', assignee: null });
+  await page.getByRole('checkbox', { name: 'Select all findings on this page' }).check();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Update \d+ selected findings/ })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Select all findings on this page' })).not.toBeChecked();
+});
+
+test('CSV export uses current filters and shows server bounds errors', async ({ page, request }) => {
+  await page.goto('/findings?q=Finding%20121&project=payments');
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export matching CSV' }).click();
+  expect((await downloadPromise).suggestedFilename()).toBe('secops-findings.csv');
+  let state = await (await request.get(`${backend}/__test/state`)).json();
+  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings/export.csv').query).toMatchObject({ q: 'Finding 121', project: 'payments' });
+  await request.post(`${backend}/__test/reset`, { data: { failExport: true } });
+  await page.getByRole('button', { name: 'Export matching CSV' }).click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('refine your filters');
+});
+
+test('viewer controls are read-only and analysts never fetch integration configuration', async ({ page, context, request }) => {
+  await context.clearCookies();
+  const login = async (username: string) => {
+    await page.goto('/login');
+    await page.getByLabel('Username', { exact: true }).fill(username);
+    await page.getByLabel('Password', { exact: true }).fill('Regression-password-7S9rY2aK5qW8');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  };
+  await login('viewer');
+  await page.goto('/findings');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('checkbox', { name: /Select/ })).toHaveCount(0);
+  await page.goto(`/findings/${findingId}`);
+  await expect(page.getByRole('button', { name: 'Update Finding' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Comment', exact: true })).toHaveCount(0);
+  await page.goto('/assets');
+  await expect(page.getByRole('button', { name: 'Add Asset' })).toHaveCount(0);
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Users', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await login('analyst');
+  await page.goto('/integrations');
+  await expect(page.getByRole('button', { name: 'Import Scan Results', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Notifications', exact: true })).toHaveCount(0);
+  const state = await (await request.get(`${backend}/__test/state`)).json();
+  expect(state.requests.filter((entry: { path: string; actor: string }) => entry.actor === 'analyst' && entry.path === '/integrations')).toHaveLength(0);
+});
+
+test('login also requires an exact trusted Origin and invalid sessions stay JSON at the API', async ({ request }) => {
+  for (const origin of [undefined, 'null', 'https://attacker.invalid']) {
+    const response = await request.post('/api/auth/login', { headers: origin ? { Origin: origin } : {}, data: { username: 'reviewer', password: 'Regression-password-7S9rY2aK5qW8' } });
+    expect(response.status()).toBe(403);
+  }
+  const response = await request.get('/api/findings', { headers: { Cookie: 'secops_session=invalid', Authorization: spoofedAuthorization, 'X-API-Key': 'untrusted-key', 'X-SecOps-User': 'reviewer' } });
+  expect(response.status()).toBe(401);
+  expect(response.headers()['content-type']).toContain('application/json');
+  expect(response.headers().location).toBeUndefined();
 });

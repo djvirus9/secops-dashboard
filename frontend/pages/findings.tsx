@@ -1,4 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
+import { useAuth } from "../lib/auth";
+import { downloadFindings } from "../lib/api";
+import { filterQuery, initialFilters, readFilters, type FindingFilters } from "../lib/finding-filters";
+import { SavedViews } from "../components/saved-views";
+import { BulkFindings } from "../components/bulk-findings";
 import Link from "next/link";
 import { useApiResource } from "../lib/use-api-resource";
 import { ErrorNotice, Pagination } from "../components/feedback";
@@ -8,14 +14,26 @@ type Finding = {
   project?: string; status: string; assignee: string | null; risk_score: number; last_seen: string;
 };
 type Page = { count: number; page_count: number; offset: number; results: Finding[] };
-const initialFilters = { q: "", severity: "", status: "", assignee: "", tool: "", project: "", sort: "risk_desc" };
 const limit = 50;
 
 export default function FindingsPage() {
+  const router = useRouter(); const { canWrite } = useAuth();
+  const filters = useMemo(() => readFilters(router.query), [router.query]);
+  const rawOffset = typeof router.query.offset === "string" ? Number(router.query.offset) : 0;
+  const offset = Number.isSafeInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
   const [draft, setDraft] = useState(initialFilters);
-  const [filters, setFilters] = useState(initialFilters);
-  const [offset, setOffset] = useState(0);
-  const { data, error, loading, reload } = useApiResource<Page>("/findings", { ...filters, limit, offset });
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false); const [exporting, setExporting] = useState(false);
+  const [actionError, setActionError] = useState(""); const [success, setSuccess] = useState("");
+  const stateKey = JSON.stringify({ ...filters, offset });
+  const { data, error, loading, reload } = useApiResource<Page>("/findings", { ...filters, limit, offset }, router.isReady);
+  useEffect(() => { setDraft(filters); setSelected([]); setSuccess(""); }, [stateKey]);
+  const navigate = (next: FindingFilters, nextOffset = 0) => { setSelected([]); void router.push({ pathname: "/findings", query: filterQuery(next, nextOffset) }, undefined, { shallow: true }); };
+  async function exportCsv() {
+    setExporting(true); setActionError("");
+    try { await downloadFindings(filters); } catch (reason) { setActionError(reason instanceof Error ? reason.message : "Export failed"); }
+    finally { setExporting(false); }
+  }
   const field = (name: keyof typeof draft, label: string) => <label className="grid gap-1 text-sm" key={name}>
     {label}<input className="input" value={draft[name]} onChange={(event) => setDraft({ ...draft, [name]: event.target.value })} />
   </label>;
@@ -23,10 +41,10 @@ export default function FindingsPage() {
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold">Findings</h1>
-      <button className="button-secondary" onClick={reload} disabled={loading}>Refresh</button>
+      <div className="flex gap-2"><button className="button-secondary" onClick={() => { setSelected([]); reload(); }} disabled={loading || busy}>Refresh</button><button className="button-secondary" onClick={() => void exportCsv()} disabled={exporting}>Export matching CSV</button></div>
     </div>
     <form className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-gray-700 dark:bg-gray-800" onSubmit={(event) => {
-      event.preventDefault(); setOffset(0); setFilters({ ...draft });
+      event.preventDefault(); navigate(readFilters(draft));
     }}>
       {field("q", "Search findings")}
       <label className="grid gap-1 text-sm">Severity
@@ -48,11 +66,15 @@ export default function FindingsPage() {
       </label>
       {field("project", "Project")}{field("tool", "Tool")}{field("assignee", "Assignee")}
       <div className="flex items-end gap-2">
-        <button className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white" type="submit">Apply filters</button>
-        <button className="button-secondary" type="button" onClick={() => { setDraft(initialFilters); setFilters(initialFilters); setOffset(0); }}>Clear</button>
+        <button disabled={busy} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white" type="submit">Apply filters</button>
+        <button className="button-secondary" type="button" disabled={busy} onClick={() => navigate(initialFilters)}>Clear</button>
       </div>
     </form>
+    <SavedViews filters={filters} apply={next => navigate(next)} />
     <ErrorNotice message={error} retry={reload} />
+    <ErrorNotice message={actionError} />
+    {success && <p role="status">{success}</p>}
+    {canWrite && selected.length > 0 && <BulkFindings key={selected.join(",")} ids={selected} pending={setBusy} done={message => { setSuccess(message); setSelected([]); reload(); }} />}
     {loading && <p role="status">Loading findings…</p>}
     {data && <>
       {data.results.length === 0 ? <p className="rounded-xl border p-6 dark:border-gray-700">No findings match these filters.</p> :
@@ -60,9 +82,11 @@ export default function FindingsPage() {
           <table className="min-w-full text-sm">
             <caption className="sr-only">Security findings matching the current filters</caption>
             <thead className="bg-gray-50 dark:bg-gray-900"><tr>
+              {canWrite && <th className="p-3"><input type="checkbox" aria-label="Select all findings on this page" disabled={busy || loading} checked={data.results.length > 0 && selected.length === data.results.length} onChange={event => setSelected(event.target.checked ? data.results.map(f => f.id) : [])} /></th>}
               {["Risk", "Severity", "Status", "Title", "Project / asset", "Assignee", "Last seen", "Actions"].map((label) => <th key={label} scope="col" className="p-3 text-left">{label}</th>)}
             </tr></thead>
             <tbody>{data.results.map((finding) => <tr key={finding.id} className="border-t hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/50">
+              {canWrite && <td className="p-3"><input type="checkbox" aria-label={`Select ${finding.title}`} disabled={busy || loading} checked={selected.includes(finding.id)} onChange={event => setSelected(event.target.checked ? [...selected, finding.id] : selected.filter(id => id !== finding.id))} /></td>}
               <td className="p-3 font-semibold">{finding.risk_score}</td>
               <td className="p-3"><span className={`rounded-sm px-2 py-1 text-xs font-medium ${finding.severity === "critical" || finding.severity === "high" ? "bg-red-100 text-red-900 dark:bg-red-900/50 dark:text-red-200" : "bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-gray-100"}`}>{finding.severity}</span></td>
               <td className="p-3">{finding.status}</td>
@@ -74,7 +98,7 @@ export default function FindingsPage() {
             </tr>)}</tbody>
           </table>
         </div>}
-      <Pagination count={data.count} offset={offset} limit={limit} loading={loading} onPage={setOffset} />
+      <Pagination count={data.count} offset={offset} limit={limit} loading={loading || busy} onPage={value => navigate(filters, value)} />
     </>}
   </div>;
 }

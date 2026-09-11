@@ -141,7 +141,7 @@ def test_status_audit_uses_authenticated_actor(client, auth_headers):
     assert scan(client, auth_headers, [{"title": "Audit", "severity": "low"}]).status_code == 200
     row = client.get("/findings", headers=auth_headers).json()["results"][0]
     client.patch(f"/findings/{row['id']}", headers={**auth_headers, "X-SecOps-User": "alice"}, json={"status": "resolved"})
-    assert client.get(f"/findings/{row['id']}", headers=auth_headers).json()["comments"][0]["author"] == "alice"
+    assert client.get(f"/findings/{row['id']}", headers=auth_headers).json()["comments"][0]["author"] == "api-admin"
 
 
 def test_operations_require_administrative_access(client, ingest_headers):

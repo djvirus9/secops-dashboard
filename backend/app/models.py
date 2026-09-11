@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, String, Integer, Float, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -143,3 +143,71 @@ class NotificationDelivery(Base):
     external_url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(16))
+    # NULL grants all projects; a JSON list grants only its listed projects.
+    projects_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AuthThrottle(Base):
+    __tablename__ = "auth_throttles"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+class AuthLock(Base):
+    __tablename__ = "auth_locks"
+
+    # The identity service uses row 1 to serialize account lifecycle changes.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+
+
+class SavedView(Base):
+    __tablename__ = "saved_views"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_saved_views_user_name"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    filters_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    actor: Mapped[str] = mapped_column(String(100))
+    action: Mapped[str] = mapped_column(String(100))
+    object_type: Mapped[str] = mapped_column(String(100))
+    object_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)

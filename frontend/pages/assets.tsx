@@ -1,3 +1,4 @@
+import { useAuth } from "../lib/auth";
 import { useState } from "react";
 import { apiPost } from "../lib/api";
 import { useApiResource } from "../lib/use-api-resource";
@@ -32,6 +33,7 @@ const defaultForm = {
 };
 
 export default function Assets() {
+  const { canWrite } = useAuth();
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState({ q: "", project: "" });
   const [filters, setFilters] = useState(search);
@@ -104,13 +106,13 @@ export default function Assets() {
             Manage your infrastructure inventory with ownership and criticality.
           </p>
         </div>
-        <button
+        {canWrite && <button
           onClick={() => { if (showForm) cancelEdit(); else { setForm(defaultForm); setEditingId(null); setErr(""); setShowForm(true); } }}
           disabled={saving}
           className="rounded-lg bg-black dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-black hover:opacity-80 transition-opacity"
         >
           {showForm ? "Cancel" : "Add Asset"}
-        </button>
+        </button>}
       </div>
 
       <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); setOffset(0); setFilters({ ...search }); }}>
@@ -122,7 +124,7 @@ export default function Assets() {
       <ErrorNotice message={error} retry={loadAssets} />
       <ErrorNotice message={err} />
 
-      {showForm && (
+      {canWrite && showForm && (
         <form onSubmit={handleSubmit} className="rounded-xl border dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-xs">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             {editingId ? "Edit Asset" : "Add New Asset"}
@@ -264,14 +266,14 @@ export default function Assets() {
                     {new Date(asset.updated_at).toLocaleDateString()}
                   </td>
                   <td className="p-3">
-                    <button
+                    {canWrite && <button
                       onClick={() => editAsset(asset)}
                       disabled={saving}
                       aria-label={`Edit ${asset.name}`}
                       className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
                     >
                       Edit
-                    </button>
+                    </button>}
                   </td>
                 </tr>
               ))}

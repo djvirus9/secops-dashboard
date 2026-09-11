@@ -6,7 +6,8 @@ if [[ $# -ne 1 || ! -f "$1" ]]; then
     echo "Usage: infra/verify-restore.sh BACKUP.dump" >&2
     exit 1
 fi
-for secops_expected in "${SECOPS_EXPECTED_FINDINGS:-}" "${SECOPS_EXPECTED_COMMENTS:-}"; do
+for secops_expected in "${SECOPS_EXPECTED_FINDINGS:-}" "${SECOPS_EXPECTED_COMMENTS:-}" \
+    "${SECOPS_EXPECTED_USERS:-}" "${SECOPS_EXPECTED_SESSIONS:-}" "${SECOPS_EXPECTED_SAVED_VIEWS:-}"; do
     if [[ -n "$secops_expected" && ! "$secops_expected" =~ ^[0-9]+$ ]]; then
         echo "Expected restore row counts must be nonnegative integers" >&2
         exit 1
@@ -45,4 +46,31 @@ if [[ -n "${SECOPS_EXPECTED_FINDINGS:-}" && "$secops_findings" != "$SECOPS_EXPEC
     exit 1
 fi
 echo "Restored findings: $secops_findings; comments: $secops_comments"
+# Identity tables were introduced in 0.2. A restored 0.1 archive may omit them;
+# report zero without issuing a SELECT against an absent relation.
+for secops_table in users user_sessions saved_views; do
+    case "$secops_table" in
+        users) secops_expected="${SECOPS_EXPECTED_USERS:-}" ;;
+        user_sessions) secops_expected="${SECOPS_EXPECTED_SESSIONS:-}" ;;
+        saved_views) secops_expected="${SECOPS_EXPECTED_SAVED_VIEWS:-}" ;;
+    esac
+    secops_exists="$("${secops_compose[@]}" exec -T postgres sh -c \
+        'exec psql -U "$POSTGRES_USER" --dbname="$1" --no-psqlrc --set=ON_ERROR_STOP=1 --tuples-only --no-align --command="$2"' \
+        sh "$secops_restore_db" "SELECT to_regclass('public.$secops_table') IS NOT NULL;")"
+    if [[ "$secops_exists" == t ]]; then
+        secops_count="$("${secops_compose[@]}" exec -T postgres sh -c \
+            'exec psql -U "$POSTGRES_USER" --dbname="$1" --no-psqlrc --set=ON_ERROR_STOP=1 --tuples-only --no-align --command="$2"' \
+            sh "$secops_restore_db" "SELECT count(*) FROM public.$secops_table;")"
+    elif [[ "$secops_exists" == f ]]; then
+        secops_count=0
+    else
+        echo "Restore table-existence verification did not produce a valid result" >&2
+        exit 1
+    fi
+    if [[ ! "$secops_count" =~ ^[0-9]+$ ]] || [[ -n "$secops_expected" && "$secops_count" != "$secops_expected" ]]; then
+        echo "Restored $secops_table count does not match the expected backup contents" >&2
+        exit 1
+    fi
+    echo "Restored $secops_table: $secops_count (table present: $secops_exists)"
+done
 echo "Restore completed in an isolated database; the active application database was not changed."

@@ -2,7 +2,9 @@
 
 SecOps Dashboard is a self-hosted application for one trusted team. Contributions
 should preserve that documented boundary, keep scanner credentials separate from
-administrative access, and avoid treating project filters as access control.
+administrative access, and enforce project grants on the backend independently
+of user-supplied filters. Read the [threat model](docs/threat-model.md) when changing
+identity, authorization, imports, exports, or privileged workflows.
 
 ## Start a local instance
 
@@ -19,7 +21,10 @@ python3 scripts/local.py seed
 The dashboard runs at <http://127.0.0.1:5050>. The helper creates an isolated
 SQLite database and generated credentials in `.local/`, disables external
 notifications, and installs/builds dependencies as needed. Use `status` and `stop`
-to manage this instance; stopping preserves its data. Use synthetic findings for
+to manage this instance; stopping preserves accounts, changed passwords, sessions,
+and data. `credentials` displays only the initial bootstrap password; recover a
+changed/forgotten password with `python3 scripts/local.py reset-password --username admin`
+in an interactive terminal. Use synthetic findings for
 development. Never commit `.local/`, `.env`, credentials, databases, or real scan
 reports. The [README](README.md#manual-development-setup) also describes a manual
 setup with live code reloading.
@@ -93,7 +98,13 @@ PostgreSQL. Changes to finding identity must explain what happens when existing
 reports are reimported; migrations must not silently merge or delete historical
 findings.
 
-Keep API keys server-side, preserve origin checks on browser writes, redact
-secret evidence, and use synthetic integration endpoints in tests. Do not copy
+Account and workflow changes need tests across admin/analyst/viewer roles and
+project boundaries, including missing or mixed-authority IDs, revoked sessions,
+and filters saved before grants change. Exercise login/logout, password changes,
+restart persistence, bulk atomicity, and spreadsheet formula handling through
+the real backend where relevant. Use only disposable databases and synthetic accounts.
+
+Keep API keys out of frontend processes, preserve origin checks on browser writes,
+redact secret evidence, and use synthetic integration endpoints in tests. Do not copy
 third-party code or fixtures without permission and any required license notices.
 The project license is [MIT](LICENSE).
