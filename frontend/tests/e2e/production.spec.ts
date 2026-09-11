@@ -236,6 +236,33 @@ test('expired sessions return to login with findings filters intact', async ({ p
   await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
 });
 
+for (const returnPath of [
+  'https://attacker.invalid/path', '//attacker.invalid/path', '/\\attacker.invalid/path',
+  '/%2f%2fattacker.invalid', '/%5cattacker.invalid', '/findings/%2e%2e/%2fattacker.invalid',
+  '/findings?project=%ZZ', '/findings?project=%E0%A4%A', '/findings/------------------------------------',
+]) {
+  test(`login rejects unsafe or malformed return path ${returnPath}`, async ({ page }) => {
+    await page.goto(`/login?${new URLSearchParams({ next: returnPath })}`);
+    await expect(page).toHaveURL('http://127.0.0.1:15100/');
+  });
+}
+
+test('login return routes preserve query data and validate finding IDs separately', async ({ page }) => {
+  const filters = '/findings?project=payments&q=Finding%201&severity=high&next=https%3A%2F%2Fattacker.invalid#filters';
+  await page.goto(`/login?${new URLSearchParams({ next: filters })}`);
+  await expect(page).toHaveURL(url => url.pathname === '/findings' && url.hash === '#filters');
+  expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ project: 'payments', q: 'Finding 1', severity: 'high', next: 'https://attacker.invalid' });
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('payments');
+  await expect(page.getByLabel('Search findings')).toHaveValue('Finding 1');
+  await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('high');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
+
+  const detail = `/findings/${findingId}?id=https%3A%2F%2Fattacker.invalid&next=%2F%2Fattacker.invalid`;
+  await page.goto(`/login?${new URLSearchParams({ next: detail })}`);
+  await expect(page).toHaveURL(`http://127.0.0.1:15100/findings/${findingId}?next=%2F%2Fattacker.invalid`);
+  await expect(page.getByRole('heading', { name: 'Finding 1', exact: true })).toBeVisible();
+});
+
 test('saved views persist applied filters, support rename/delete and browser history', async ({ page }) => {
   await page.goto('/findings?project=payments&severity=high&unknown=ignored');
   await expect(page.getByLabel('Severity', { exact: true })).toHaveValue('high');

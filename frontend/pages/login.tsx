@@ -1,13 +1,13 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/router";
-import { safeReturnPath, useAuth } from "../lib/auth";
+import { safeReturnRoute, useAuth } from "../lib/auth";
 import { ErrorNotice } from "../components/feedback";
 
 export default function Login() {
   const auth = useAuth(); const router = useRouter();
   const [username, setUsername] = useState(""); const [password, setPassword] = useState("");
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  useEffect(() => { if (router.isReady && auth.user) void router.replace(safeReturnPath(router.query.next)); }, [auth.user, router]);
+  useEffect(() => { if (router.isReady && auth.user) void router.replace(safeReturnRoute(router.query.next)); }, [auth.user, router]);
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try { await auth.login(username, password); }
