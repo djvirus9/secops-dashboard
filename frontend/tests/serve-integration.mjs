@@ -1,4 +1,4 @@
-// Migrated disposable SQLite + the actual FastAPI application and production Next server.
+// Migrated disposable SQLite + actual FastAPI/worker with a tests-only GitHub client fixture.
 import { mkdtemp, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -14,6 +14,7 @@ const env = { ...process.env, DATABASE_URL: `sqlite:///${databaseDir}/integratio
   CORS_ORIGINS: 'http://127.0.0.1:15110', DASHBOARD_ORIGINS: 'http://127.0.0.1:15110', SESSION_COOKIE_SECURE: 'false',
   DASHBOARD_USERNAME: 'reviewer', DASHBOARD_PASSWORD: 'Integration-password-9b7f2d1e6c4a', ALLOW_INSECURE_NO_AUTH: 'false', ALLOW_UNVERIFIED_PARSERS: 'false',
   SLACK_WEBHOOK_URL: '', JIRA_BASE_URL: '', JIRA_EMAIL: '', JIRA_API_TOKEN: '', JIRA_PROJECT_KEY: '',
+  GITHUB_SYNC_TOKEN: '',
   STORE_RAW_SCAN_DATA: 'false', PYTHONDONTWRITEBYTECODE: '1' };
 const children = [];
 let stopping = false;
@@ -38,7 +39,7 @@ try {
     migration.once('error', reject);
     migration.once('exit', (code) => code === 0 ? resolveMigration() : reject(new Error(`Migration failed (${code})`)));
   });
-  const backend = launch(['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '15111', '--log-level', 'warning']);
+  const backend = launch(['-m', 'uvicorn', '--app-dir', 'tests', 'browser_app:app', '--host', '127.0.0.1', '--port', '15111', '--log-level', 'warning']);
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
     if (backend.exitCode !== null) throw new Error('Integration backend stopped before becoming ready');
@@ -50,7 +51,7 @@ try {
   await cp('public', '.next/standalone/public', { recursive: true });
   await cp('.next/static', '.next/standalone/.next/static', { recursive: true });
   const frontend = spawn(process.execPath, ['.next/standalone/server.js'], {
-    stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1',
+    stdio: 'inherit', env: { ...process.env, GITHUB_SYNC_TOKEN: '', NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1',
       HOSTNAME: '0.0.0.0', PORT: '15110', BACKEND_URL: 'http://127.0.0.1:15111',
       DASHBOARD_ORIGINS: 'http://127.0.0.1:15110' },
   });

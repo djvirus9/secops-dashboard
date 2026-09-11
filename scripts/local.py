@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -11,9 +12,11 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
+import warnings
 from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -79,12 +82,70 @@ def environment(port: int, api_port: int) -> dict[str, str]:
            "ALLOW_INSECURE_NO_AUTH": "false", "ALLOW_UNVERIFIED_PARSERS": "false",
            "STORE_RAW_SCAN_DATA": "false", "NEXT_TELEMETRY_DISABLED": "1",
            "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1"}
+    # Opt in only through this installation's private file, never ambient tokens.
+    env["GITHUB_SYNC_TOKEN"] = read_github_token()
+    env["GITHUB_SYNC_POLL_SECONDS"] = "5"
     # Local demos cannot accidentally send real messages using ambient credentials.
     for key in ("SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY"):
         env[key] = ""
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = ",".join(filter(None, (env.get(key), "127.0.0.1", "localhost", "::1")))
     return env
+
+
+def read_github_token() -> str:
+    path = LOCAL / "github-token"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return ""
+    with os.fdopen(descriptor) as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise RuntimeError(".local/github-token must be an owner-only regular file with mode 0600")
+        token = source.read(513)
+    validate_github_token(token)
+    return token
+
+
+def validate_github_token(token: str) -> None:
+    if not 32 <= len(token) <= 512 or not token.isascii() or any(char.isspace() or ord(char) < 33 or ord(char) > 126 for char in token):
+        raise RuntimeError("GitHub token must contain 32–512 printable ASCII characters without whitespace")
+
+
+def github_token(clear: bool = False) -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise RuntimeError("Run github-token in an interactive terminal")
+    path = LOCAL / "github-token"
+    if clear:
+        path.unlink(missing_ok=True)
+        print("Local GitHub token removed. Stop and start local services to apply the change.")
+        return
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            token = getpass.getpass("GitHub token (input hidden): ")
+    except getpass.GetPassWarning:
+        raise RuntimeError("This terminal cannot disable echo; the GitHub token was not saved") from None
+    except EOFError:
+        raise RuntimeError("GitHub token entry cancelled; no changes were saved") from None
+    validate_github_token(token)
+    temporary = LOCAL / ("github-token." + secrets.token_hex(8) + ".tmp")
+    try:
+        with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as output:
+            output.write(token)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print("GitHub token saved privately. Stop and start local services to apply the change.")
+
+
+def service_environment(name: str, env: dict[str, str]) -> dict[str, str]:
+    if name == "frontend":
+        return frontend_environment(env)
+    if name in {"backend", "github-worker"}:
+        return env
+    return {key: value for key, value in env.items() if key != "GITHUB_SYNC_TOKEN"}
 
 
 def frontend_environment(env: dict[str, str]) -> dict[str, str]:
@@ -155,7 +216,7 @@ def prepare(env: dict) -> None:
         str(PYTHON), "-c", "import fastapi,sqlalchemy,psycopg2,uvicorn,alembic,defusedxml,dotenv,argon2"],
         capture_output=True).returncode == 0
     build_env = dict(env)
-    for key in (*credentials(), "DATABASE_URL", "PGPASSWORD"):
+    for key in (*credentials(), "DATABASE_URL", "PGPASSWORD", "GITHUB_SYNC_TOKEN"):
         build_env.pop(key, None)
     requirements = fingerprint([ROOT / "backend/requirements.txt"])
     if created_venv or not dependencies_present or cached.get("requirements") != requirements or cached.get("python") != python_runtime:
@@ -242,17 +303,18 @@ def serve(run_id: str, port: int, api_port: int) -> None:
         try:
             # Fresh local schema; no existing legacy database is stamped or replaced.
             subprocess.run([str(PYTHON), "-m", "alembic", "upgrade", "head"],
-                           cwd=ROOT / "backend", env=env, check=True)
+                           cwd=ROOT / "backend", env=service_environment("migration", env), check=True)
             commands = [
                 ("backend", [str(PYTHON), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(api_port)], ROOT / "backend"),
                 ("worker", [str(PYTHON), "-m", "app.notifications.worker"], ROOT / "backend"),
+                ("github-worker", [str(PYTHON), "-m", "app.github_sync.worker"], ROOT / "backend"),
                 ("frontend", [shutil.which("node"), str(ROOT / "frontend/.next/standalone/server.js")], ROOT / "frontend"),
             ]
             for name, command, directory in commands:
                 if stopping:
                     return
                 with (LOCAL / f"{name}.log").open("a") as log:
-                    child_env = frontend_environment(env) if name == "frontend" else env
+                    child_env = service_environment(name, env)
                     children.append(subprocess.Popen(command, cwd=directory, env=child_env,
                                                      stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT))
             state["ready"] = True
@@ -340,6 +402,8 @@ def main() -> int:
         commands.add_parser(command, help=help_text)
     recovery_parser = commands.add_parser("reset-password", help="Interactively recover a local account password")
     recovery_parser.add_argument("--username", required=True)
+    token_parser = commands.add_parser("github-token", help="Store an optional GitHub sync token using hidden terminal input")
+    token_parser.add_argument("--clear", action="store_true", help="Remove the saved GitHub token")
     args = parser.parse_args()
     try:
         import fcntl
@@ -355,6 +419,8 @@ def main() -> int:
                 seed()
             elif args.command == "reset-password":
                 reset_password(args.username)
+            elif args.command == "github-token":
+                github_token(args.clear)
             elif args.command == "status":
                 state = running_state()
                 if not state:

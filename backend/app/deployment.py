@@ -60,6 +60,10 @@ def _require_secret(name: str, minimum: int, value: str | None = None) -> None:
 
 
 def validate_backend_settings() -> None:
+    github_token = os.environ.get("GITHUB_SYNC_TOKEN", "")
+    if github_token and (not 32 <= len(github_token) <= 512 or not github_token.isascii()
+                         or any(ord(char) < 33 or ord(char) > 126 for char in github_token)):
+        raise ValueError("GITHUB_SYNC_TOKEN must be 32–512 printable ASCII characters without whitespace")
     if os.environ.get("ALLOW_INSECURE_NO_AUTH", "").lower() not in TRUE_VALUES:
         _require_secret("API_KEY", 32)
         _require_secret("INGEST_API_KEY", 32)
@@ -77,6 +81,7 @@ def validate_backend_settings() -> None:
         "MAX_FINDINGS_PER_IMPORT": (10000, 1, 100000),
         "IMPORT_TIMEOUT_SECONDS": (900, 1, 3600),
         "NOTIFICATION_POLL_SECONDS": (5, 1, 300),
+        "GITHUB_SYNC_POLL_SECONDS": (5, 1, 300),
         "NOTIFICATION_MAX_ATTEMPTS": (5, 1, 20),
         "SESSION_TTL_SECONDS": (43200, 300, 604800),
         "SESSION_IDLE_TIMEOUT_SECONDS": (1800, 60, 86400),

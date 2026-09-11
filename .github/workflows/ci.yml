@@ -50,6 +50,8 @@ jobs:
       - run: alembic upgrade head
       - run: alembic check
       - run: pytest -q
+      - name: Rehearse upgrade from a populated 0.2 database
+        run: python ../scripts/check_upgrade.py
       - run: python -m compileall -q app
       - run: pip-audit -r requirements.txt
 
@@ -90,7 +92,9 @@ jobs:
       - run: npm run test:integration
       - run: npm audit --audit-level=high
       - name: Local launcher regression tests
-        run: cd .. && python3 -m unittest discover -s scripts -p test_local.py -v
+        run: cd .. && python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Compile release and deployment helpers
+        run: cd .. && python3 -m compileall -q scripts infra/smoke.py
       - name: Local quickstart and restart persistence
         run: cd .. && SECOPS_LOCAL_SMOKE_TEST=1 python3 scripts/check_local.py
 
@@ -107,17 +111,25 @@ jobs:
       SESSION_COOKIE_SECURE: "false"
       SECOPS_SMOKE_TEST: "1"
       SECOPS_ENV_FILE: /dev/null
+      SECOPS_COMPOSE_FILE: infra/docker-compose.images.yml
+      BACKEND_IMAGE: secops-backend:ci
+      FRONTEND_IMAGE: secops-frontend:ci
+      SECOPS_IMAGE_PULL_POLICY: never
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t secops-backend ./backend
-      - run: docker build -t secops-frontend ./frontend
+      - name: Validate both deployment modes and secret boundaries
+        run: python3 scripts/check_compose.py
+      - run: docker build -t secops-backend:ci ./backend
+      - run: docker build -t secops-frontend:ci ./frontend
       - name: Build optional Node 26 frontend
         run: docker build --build-arg NODE_MAJOR=26 -t secops-frontend-node26 ./frontend
-      - run: docker compose -f infra/docker-compose.yml up --build --wait --wait-timeout 120
+      - run: docker compose -f "$SECOPS_COMPOSE_FILE" up --no-build --wait --wait-timeout 180
       - run: python3 infra/smoke.py
+      - name: Verify unconfigured GitHub worker is healthy
+        run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T github-worker python -m app.github_sync.worker --health
       - run: infra/backup.sh /tmp/secops-ci.dump
-      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 infra/verify-restore.sh /tmp/secops-ci.dump
+      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 SECOPS_EXPECTED_SCANNER_TOKENS=1 SECOPS_EXPECTED_GITHUB_CONNECTIONS=1 SECOPS_EXPECTED_GITHUB_SYNC_RUNS=0 SECOPS_EXPECTED_GITHUB_ALERTS=0 infra/verify-restore.sh /tmp/secops-ci.dump
       - if: failure()
-        run: docker compose -f infra/docker-compose.yml logs --no-color --tail 100
+        run: docker compose -f "$SECOPS_COMPOSE_FILE" logs --no-color --tail 100
       - if: always()
-        run: docker compose -f infra/docker-compose.yml down --volumes
+        run: docker compose -f "$SECOPS_COMPOSE_FILE" down --volumes

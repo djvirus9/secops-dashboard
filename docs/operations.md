@@ -2,11 +2,11 @@
 
 ## Deployment boundary
 
-Deploy one backend and notification worker for a trusted security team, with
+Deploy one backend, notification worker and GitHub sync worker for a trusted security team, with
 PostgreSQL persistence and a TLS reverse proxy in front of Next.js. Projects are
 both identity namespaces and access grants for local user accounts. Administrators
 can access every project; analysts can modify granted projects and viewers can
-read them. User actions record the authenticated username. SSO, MFA, GitHub sync,
+read them. User actions record the authenticated username. SSO, MFA,
 tenant isolation, and high availability require additional work before using this
 as a multi-organization service. See the [threat model](threat-model.md).
 
@@ -19,6 +19,22 @@ need at least 24. Passwords created/changed through account management require
 suitable independent bootstrap password or API/database secret.
 Do not use output from `docker compose config` in logs; use `config --quiet` to
 validate configuration without displaying environment secrets.
+
+Choose one Compose mode and keep the same Compose project name and PostgreSQL
+volume during upgrades. All examples below respect this shell setting:
+
+```bash
+export SECOPS_COMPOSE_FILE=infra/docker-compose.images.yml  # published release digests
+# export SECOPS_COMPOSE_FILE=infra/docker-compose.yml       # build the source checkout
+```
+
+For image mode, copy the release's `BACKEND_IMAGE` and `FRONTEND_IMAGE` digest
+references into your private `.env`. The image file contains no build configuration.
+The files share service settings through `infra/compose.services.yml`; keep all
+three files from the same release. `backup.sh` and `verify-restore.sh` use
+`SECOPS_COMPOSE_FILE` too. Set `COMPOSE_PROJECT_NAME` to the existing project's name
+if your previous deployment explicitly set it; changing it selects another volume.
+See [image provenance and the release procedure](releasing.md).
 
 ## TLS and canonical browser origin
 
@@ -91,7 +107,7 @@ For Compose, use the backend's configured database environment and interactive
 prompts; do not pass the new password on the command line:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml exec backend python -m app.accounts reset-password --username admin
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec backend python -m app.accounts reset-password --username admin
 ```
 
 Both commands prompt twice, update an existing account, and revoke its sessions.
@@ -104,26 +120,51 @@ project grants and records actor `api-admin`. `INGEST_API_KEY` can ingest into
 any project and records actor `scanner`; it cannot read findings or manage users.
 Neither key is passed to the frontend. `X-SecOps-User` cannot choose an audit actor.
 
+## Scanner tokens
+
+Use Scanner Tokens as an administrator to create a separate ingestion credential
+for each scanner/project. Each token is limited to one exact project and only the
+two ingestion endpoints. It cannot read findings, administer users or trigger
+GitHub sync. Specify that same project in the submitted payload; a different
+project is rejected. The empty project name grants only historical unscoped imports.
+
+The secret is returned once at creation or rotation. Store it in the scanner's
+secret store and send it as `X-API-Key`, never in a URL or committed report.
+Only its hash is persisted. Inventory shows the name, project, expiry, revocation
+and last use, while audit records use stable actor `scanner:<token id>`.
+Expiry defaults to 90 days and accepts 1–365 days; at most 100 active tokens and
+1,000 token records are allowed. Rotation keeps the inventory identity and replaces
+the credential immediately; update the scanner's secret after rotating. Revocation
+and expiry reject subsequent requests without a service restart. A request already
+being processed may finish, so stop compromised jobs as well as revoking their token.
+
+The legacy `INGEST_API_KEY` is retained for compatibility and remains global for
+ingestion. Move ordinary scanner jobs to individual scoped tokens; reserve the
+shared key and unrestricted administrative `API_KEY` for trusted automation.
+
 ## Start and verify
 
 From the repository root, after setting `.env`:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml config --quiet
-docker compose --env-file .env -f infra/docker-compose.yml up --build -d
-docker compose --env-file .env -f infra/docker-compose.yml ps
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" config --quiet
+docker compose --env-file .env -f "$SECOPS_COMPOSE_FILE" up --no-build --wait
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" ps
 curl --fail http://127.0.0.1:8000/ready
 ```
 
-All four services should be running and healthy. Backend startup validates its
-configuration and upgrades the schema before serving; worker and frontend wait
-for backend readiness. The worker health check verifies a recent successful
-database polling heartbeat. A green heartbeat does not prove Slack/Jira delivery;
+For source mode, replace `up --no-build --wait` with `up --build --wait`.
+
+All five services should be running and healthy. Backend startup validates its
+configuration and upgrades the schema before serving; workers and frontend wait
+for backend readiness. Each worker health check verifies a recent successful
+database polling heartbeat. The GitHub worker is idle and healthy without a token.
+Its heartbeat does not prove remote access; inspect GitHub Sync run history. A green heartbeat does not prove Slack/Jira delivery;
 inspect the Notifications page for failed or uncertain deliveries.
 
-The images run as non-root users. Backend and worker use Python 3.14; frontend
+The images run as non-root users. Backend and both workers use Python 3.14; frontend
 build and runtime default to Node.js 24 LTS. To evaluate Node 26, set
-`FRONTEND_NODE_MAJOR=26` in `.env` and rebuild with Compose; direct Docker builds
+`FRONTEND_NODE_MAJOR=26` in `.env` and rebuild with the source Compose file; direct Docker builds
 can use `--build-arg NODE_MAJOR=26`. This changes all frontend image stages.
 Node 26 is Current as of the 0.1.0 release, with LTS planned for October 2026;
 see the [Node.js release announcement](https://nodejs.org/en/blog/release/v26.0.0).
@@ -144,6 +185,7 @@ database/disk growth, backup age, and host free disk space.
 | `IMPORT_TIMEOUT_SECONDS` | 900 | 1–3,600 | Deadline checked before findings commit |
 | `NOTIFICATION_POLL_SECONDS` | 5 | 1–300 | Idle worker polling interval |
 | `NOTIFICATION_MAX_ATTEMPTS` | 5 | 1–20 | Automatic notification attempts |
+| `GITHUB_SYNC_POLL_SECONDS` | 5 | 1–300 | GitHub worker's idle database polling interval |
 
 The sample proxy caps the HTTP body at 13 MB. Keep proxy, frontend, and backend
 limits consistent when changing them; JSON escaping can make an HTTP request
@@ -188,10 +230,11 @@ alongside the backup inventory. Preserve credentials separately in your secret
 manager. Retention and scheduled backups are operator responsibilities; the app
 does not automatically purge historical records.
 
-Version 0.2 backups also contain password hashes, project grants, session records,
-saved views, and audit history. Protect them as authentication data. A restored
+Backups contain password hashes, project grants, session records,
+saved views, audit history and, from 0.3, scanner-token hashes and GitHub sync state. Protect them as authentication data. A restored
 database can reinstate sessions that were valid when the backup was taken;
-revoke affected accounts' sessions through password recovery before resuming
+revoke affected accounts' sessions through password recovery and rotate/revoke
+affected scanner tokens before resuming
 access when a compromise or stale-session risk motivated the recovery.
 
 ```bash
@@ -202,15 +245,20 @@ infra/verify-restore.sh /secure/backups/secops-before-upgrade.dump
 `backup.sh` uses `pg_dump --format=custom`, rejects an existing output filename,
 and checks archive readability before publishing the file. `verify-restore.sh`
 restores into a newly created temporary database, checks findings, comments,
-users, sessions and saved views, and removes only that temporary database afterward. It never replaces
+users, sessions, saved views, scanner tokens and GitHub state, and removes only that temporary database afterward. It never replaces
 the active database. Use `SECOPS_ENV_FILE=/path/to/operator.env` if needed.
+For image mode, also set `SECOPS_COMPOSE_FILE=infra/docker-compose.images.yml`;
+its image references must be present in that environment file or exported shell.
 Set `SECOPS_EXPECTED_FINDINGS` and `SECOPS_EXPECTED_COMMENTS` to known backup row
 counts to require an exact match. `SECOPS_EXPECTED_USERS`, `SECOPS_EXPECTED_SESSIONS`,
-and `SECOPS_EXPECTED_SAVED_VIEWS` optionally check the new identity/workflow tables;
+and `SECOPS_EXPECTED_SAVED_VIEWS` optionally check identity/workflow tables;
+`SECOPS_EXPECTED_SCANNER_TOKENS`, `SECOPS_EXPECTED_GITHUB_CONNECTIONS`,
+`SECOPS_EXPECTED_GITHUB_SYNC_RUNS` and `SECOPS_EXPECTED_GITHUB_ALERTS` check 0.3 state.
 session counts include revoked sessions. A mismatch fails verification and still
 removes the temporary restore database. Older 0.1 backups without these tables
 report zero and explicitly report the table as absent. CI requires one synthetic
-finding, comment, user, revoked session and private saved view to survive restore.
+finding, comment, user, revoked session, private saved view, revoked scanner token
+and unconfigured GitHub connection to survive restore; no remote GitHub request is made.
 These scripts require the configured PostgreSQL role to create/drop databases;
 use a separate operator environment when your database service restricts that
 privilege. Review row counts and test a representative restored finding before
@@ -221,9 +269,9 @@ name, and verify it before changing the application's database target. Example
 for a database named `secops_restored`, using the existing cluster:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml stop frontend backend notification-worker
-docker compose --env-file .env -f infra/docker-compose.yml exec postgres sh -c 'createdb -U "$POSTGRES_USER" secops_restored'
-docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d secops_restored --exit-on-error --no-owner --no-privileges' < /secure/backups/secops-before-upgrade.dump
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" stop frontend backend notification-worker github-worker
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec postgres sh -c 'createdb -U "$POSTGRES_USER" secops_restored'
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d secops_restored --exit-on-error --no-owner --no-privileges' < /secure/backups/secops-before-upgrade.dump
 ```
 
 Validate the restored schema and records using the matching release, update
@@ -233,9 +281,9 @@ upgrade or recovery: it deletes the persistent Compose volume.
 
 ## Upgrade and legacy database adoption
 
-1. Stop frontend/backend/worker writers; keep PostgreSQL available.
+1. Stop frontend/backend/both worker writers; keep PostgreSQL available.
 2. Create and restore-verify a backup. Record the running commit and schema revision.
-3. Build the candidate images and test the upgrade against a restored copy first.
+3. Pull the candidate release digests (or build source images) and test the upgrade against a restored copy first.
 4. For a versioned database, run the normal migration and restart sequence.
 5. For an unversioned legacy database, use the explicit adoption procedure below.
 
@@ -249,16 +297,16 @@ are refused. It does not silently repair, drop, or reinterpret an unknown schema
 First perform read-only validation:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml run --rm --no-deps backend python -m app.adopt_legacy_db
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" run --rm --no-deps backend python -m app.adopt_legacy_db
 ```
 
 After verifying the backup and stopping application writers, explicitly stamp
 the validated legacy database, then run the actual migrations separately:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml run --rm --no-deps backend python -m app.adopt_legacy_db --adopt --acknowledge-backup
-docker compose --env-file .env -f infra/docker-compose.yml run --rm --no-deps backend alembic upgrade head
-docker compose --env-file .env -f infra/docker-compose.yml up -d
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" run --rm --no-deps backend python -m app.adopt_legacy_db --adopt --acknowledge-backup
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" run --rm --no-deps backend alembic upgrade head
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" up -d
 ```
 
 The acknowledgement is an operator assertion; the tool cannot prove a backup
@@ -284,6 +332,35 @@ events without assigning historical findings to new projects. Before the first
 backend bootstrap pair. The first administrator can see all historical projects.
 Create analyst/viewer grants deliberately, including `""` when unscoped records
 should be visible. Subsequent starts never reapply the bootstrap password.
+
+Revisions 0005 and 0006 add scanner-token inventory and GitHub connections/run/alert
+state respectively. A 0.2 database upgrades normally without re-creating accounts
+or changing passwords, sessions, findings or saved views. GitHub remains idle until
+an operator adds a server credential and an administrator configures repositories.
+For the local helper, stop services and copy the complete `.local` directory to
+protected backup storage before updating source; start applies migrations to the
+same `.local/secops.db`. Do not delete `.local` or replace its initial credentials
+as an upgrade step. A rollback uses a verified pre-upgrade copy and the matching release.
+
+## GitHub sync operations
+
+Follow [GitHub token permissions and setup](github-sync.md). The backend and
+`github-worker` receive `GITHUB_SYNC_TOKEN`; frontend and notification worker do
+not. Keep it out of build arguments, images, database connection records and logs.
+After changing `.env`, recreate the backend and GitHub worker. For the local
+helper, use hidden `github-token` input or `github-token --clear`, then stop/start.
+
+The worker runs even without a token or connections. `configured: false` is an
+honest credential-availability status, not a startup failure. Once configured,
+review each connection's last successful sync, next attempt, errors and run history.
+An idle-worker heartbeat proves database polling, not permission to read a selected
+repository. Validate each source with an intentional sync and check its resulting
+findings. Pause a connection to stop new work while retaining its findings and history.
+Missing alerts never imply resolution; only reported source state changes are applied.
+
+Use `python -m app.github_sync.worker --health` inside that service for a heartbeat
+check. `--once` performs one polling cycle and can make real GitHub reads when
+configured; it is not a dry run. Do not execute live integration checks in CI.
 
 Schema changes may make an older binary incompatible. Roll back by restoring a
 verified backup into a new database and using the matching old release. A schema

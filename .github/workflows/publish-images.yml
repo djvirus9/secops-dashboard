@@ -1,0 +1,200 @@
+name: Publish release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version matching both manifests (for example v0.3.0)
+        required: true
+        type: string
+      commit:
+        description: Full current main SHA with successful post-merge CI and CodeQL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release-images
+  cancel-in-progress: false
+
+env:
+  BACKEND_NAME: ghcr.io/djvirus9/secops-dashboard-backend
+  FRONTEND_NAME: ghcr.io/djvirus9/secops-dashboard-frontend
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_COMMIT: ${{ inputs.commit }}
+
+jobs:
+  build:
+    if: github.repository == 'djvirus9/secops-dashboard' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      backend-digest: ${{ steps.backend.outputs.digest }}
+      frontend-digest: ${{ steps.frontend.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact tested main and unused version tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_images.py --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT"
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build backend variants with SBOM and provenance
+        id: backend
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.BACKEND_NAME }}:build-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.licenses=MIT
+      - name: Build frontend variants with SBOM and provenance
+        id: frontend
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.FRONTEND_NAME }}:build-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.licenses=MIT
+      - uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.BACKEND_NAME }}
+          subject-digest: ${{ steps.backend.outputs.digest }}
+          push-to-registry: true
+      - uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.FRONTEND_NAME }}
+          subject-digest: ${{ steps.frontend.outputs.digest }}
+          push-to-registry: true
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: amd64
+          - runner: ubuntu-24.04-arm
+            platform: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    env:
+      BACKEND_IMAGE: ghcr.io/djvirus9/secops-dashboard-backend@${{ needs.build.outputs.backend-digest }}
+      FRONTEND_IMAGE: ghcr.io/djvirus9/secops-dashboard-frontend@${{ needs.build.outputs.frontend-digest }}
+      COMPOSE_PROJECT_NAME: secops-release-smoke
+      SECOPS_COMPOSE_FILE: infra/docker-compose.images.yml
+      SECOPS_ENV_FILE: /dev/null
+      SECOPS_SMOKE_TEST: "1"
+      POSTGRES_PASSWORD: release-smoke-postgres-000000000000000000000
+      API_KEY: release-smoke-admin-000000000000000000000000000
+      INGEST_API_KEY: release-smoke-ingest-0000000000000000000000000
+      DASHBOARD_USERNAME: release-smoke
+      DASHBOARD_PASSWORD: release-smoke-password-000000000000000000000
+      DASHBOARD_ORIGINS: http://localhost:5000
+      SESSION_COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Start the exact release digests without building
+        run: docker compose --env-file /dev/null -f "$SECOPS_COMPOSE_FILE" up --no-build --wait --wait-timeout 180
+      - run: python3 infra/smoke.py
+      - name: Verify idle sync worker
+        run: docker compose --env-file /dev/null -f "$SECOPS_COMPOSE_FILE" exec -T github-worker python -m app.github_sync.worker --health
+      - run: infra/backup.sh /tmp/secops-release.dump
+      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 SECOPS_EXPECTED_SCANNER_TOKENS=1 SECOPS_EXPECTED_GITHUB_CONNECTIONS=1 SECOPS_EXPECTED_GITHUB_SYNC_RUNS=0 SECOPS_EXPECTED_GITHUB_ALERTS=0 infra/verify-restore.sh /tmp/secops-release.dump
+      - if: failure()
+        run: docker compose --env-file /dev/null -f "$SECOPS_COMPOSE_FILE" logs --no-color --tail 100
+      - if: always()
+        run: docker compose --env-file /dev/null -f "$SECOPS_COMPOSE_FILE" down --volumes
+
+  promote:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    env:
+      BACKEND_DIGEST: ${{ needs.build.outputs.backend-digest }}
+      FRONTEND_DIGEST: ${{ needs.build.outputs.frontend-digest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Recheck tested main and refuse version-tag replacement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_images.py --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT"
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Assign publish-once version tags to tested image indexes
+        run: |
+          docker buildx imagetools create --tag "$BACKEND_NAME:$RELEASE_VERSION" "$BACKEND_NAME@$BACKEND_DIGEST"
+          docker buildx imagetools create --tag "$FRONTEND_NAME:$RELEASE_VERSION" "$FRONTEND_NAME@$FRONTEND_DIGEST"
+          test "$(docker buildx imagetools inspect "$BACKEND_NAME:$RELEASE_VERSION" --format '{{.Manifest.Digest}}')" = "$BACKEND_DIGEST"
+          test "$(docker buildx imagetools inspect "$FRONTEND_NAME:$RELEASE_VERSION" --format '{{.Manifest.Digest}}')" = "$FRONTEND_DIGEST"
+      - name: Write immutable deployment references
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          content = '\n'.join([
+              '# SecOps Dashboard ' + os.environ['RELEASE_VERSION'],
+              '# Source commit: ' + os.environ['RELEASE_COMMIT'],
+              'BACKEND_IMAGE=' + os.environ['BACKEND_NAME'] + '@' + os.environ['BACKEND_DIGEST'],
+              'FRONTEND_IMAGE=' + os.environ['FRONTEND_NAME'] + '@' + os.environ['FRONTEND_DIGEST'],
+              '',
+          ])
+          Path('release-images.env').write_text(content)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Both architectures passed smoke and restore verification.\n\n```dotenv\n' + content + '```\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-images-${{ inputs.version }}
+          path: release-images.env
+          if-no-files-found: error
+          retention-days: 90

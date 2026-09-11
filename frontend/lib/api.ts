@@ -25,12 +25,21 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/risks", "/api/risks"],
   ["/imports", "/api/imports"],
   ["/notifications", "/api/notifications"],
+  ["/scanner-tokens", "/api/scanner-tokens"],
+  ["/github-sync", "/api/github-sync"],
   ...["/auth/login", "/auth/logout", "/auth/me", "/auth/password", "/users", "/saved-views", "/findings/bulk", "/findings/export.csv"].map((path): [string, string] => [path, `/api${path}`]),
 ]);
 const FINDING_PATH =
   /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/comments)?$/i;
 
 function toApiUrl(path: string): string {
+  const managedPath = /^\/(scanner-tokens|github-sync)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(revoke|rotate|sync|runs))?$/i.exec(path);
+  if (managedPath) {
+    const [, resource, id, action] = managedPath;
+    if (resource === "scanner-tokens" && ["revoke", "rotate"].includes(action)) return `/api/scanner-tokens/${encodeURIComponent(id)}/${action}`;
+    if (resource === "github-sync" && (!action || ["sync", "runs"].includes(action))) return `/api/github-sync/${encodeURIComponent(id)}${action ? `/${action}` : ""}`;
+    throw new Error("Unsupported API path");
+  }
   if (/^\/(users|saved-views)\/[0-9a-f-]{36}$/i.test(path)) return `/api${path}`;
   const retryPath = /^\/notifications\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/retry$/i.exec(path);
   if (retryPath) return `/api/notifications/${encodeURIComponent(retryPath[1])}/retry`;

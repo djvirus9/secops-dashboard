@@ -14,8 +14,11 @@ const nav = [
   { href: "/imports", label: "Imports" },
   { href: "/notifications", label: "Delivery" },
   { href: "/users", label: "Users" },
+  { href: "/scanner-tokens", label: "Scanner tokens" },
+  { href: "/github-sync", label: "GitHub sync" },
   { href: "/profile", label: "Account" },
 ];
+const adminPages = ["/users", "/notifications", "/scanner-tokens", "/github-sync"];
 
 export default function App(props: AppProps) { return <AuthProvider><AppShell {...props} /></AuthProvider>; }
 
@@ -49,7 +52,7 @@ function AppShell({ Component, pageProps, router }: AppProps) {
           <div className="font-semibold text-gray-900 dark:text-white">SecOps Dashboard</div>
           <div className="flex w-full min-w-0 items-start gap-2 lg:w-auto">
             <nav aria-label="Main navigation" className="flex min-w-0 flex-1 flex-wrap gap-2">
-              {auth.user && nav.filter(n => auth.isAdmin || !["/users", "/notifications"].includes(n.href)).map((n) => {
+              {auth.user && nav.filter(n => auth.isAdmin || !adminPages.includes(n.href)).map((n) => {
                 const active = router.pathname === n.href || (n.href !== "/" && router.pathname.startsWith(`${n.href}/`));
                 return (
                   <Link
@@ -99,7 +102,7 @@ function AppShell({ Component, pageProps, router }: AppProps) {
 
       <main id="main-content" className="mx-auto min-w-0 max-w-6xl px-4 sm:px-6 py-8">
         {router.pathname === "/login" ? <Component {...pageProps} /> : auth.loading ? <p role="status">Checking your session…</p> : auth.error ? <ErrorNotice message={auth.error} retry={() => void auth.reload()} /> : auth.user ?
-          !auth.isAdmin && ["/users", "/notifications"].includes(router.pathname) ? <p role="alert">This page is available to administrators.</p> : <Component {...pageProps} /> : <p role="status">Redirecting to sign in…</p>}
+          !auth.isAdmin && adminPages.includes(router.pathname) ? <p role="alert">This page is available to administrators.</p> : <Component {...pageProps} /> : <p role="status">Redirecting to sign in…</p>}
       </main>
     </div>
   );

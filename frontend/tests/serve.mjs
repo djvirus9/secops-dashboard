@@ -23,7 +23,7 @@ const finding = (index) => ({
 });
 const asset = (index) => ({ id: String(index), project: 'payments', key: `asset-${index}.invalid`, name: `Asset ${index}`, owner: 'security', environment: 'prod', criticality: 'medium', exposure: 'internal', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' });
 let state;
-function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0 }; }
+function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0, scannerTokens: [], tokenVersion: 0, githubConfigured: true, githubConnections: [], githubRuns: {} }; }
 reset();
 const send = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
 const server = createServer(async (req, res) => {
@@ -32,6 +32,12 @@ const server = createServer(async (req, res) => {
   let body; try { body = content ? JSON.parse(content) : {}; } catch { return send(res, 400, { detail: 'Invalid JSON' }); }
   if (url.pathname === '/__test/reset') { reset(); Object.assign(state, body); return send(res, 200, { ok: true }); }
   if (url.pathname === '/__test/state') return send(res, 200, state);
+  if (url.pathname === '/__test/github-complete') {
+    const connection = state.githubConnections.find(item => item.id === body.id);
+    connection.status = body.error ? 'failed' : 'succeeded'; connection.last_error = body.error || null; connection.last_synced_at = '2026-01-02T00:00:00Z';
+    (state.githubRuns[connection.id] ||= []).unshift({ id: `run-${state.githubRuns[connection.id].length + 1}`, status: connection.status, started_at: '2026-01-02T00:00:00Z', completed_at: '2026-01-02T00:00:01Z', imported: body.error ? 0 : 1, new_findings: body.error ? 0 : 1, updated: 0, error: body.error || null });
+    return send(res, 200, { ok: true });
+  }
   const token = /(?:^|;\s*)secops_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   const user = sessions.get(token);
   if (url.pathname === '/__test/expire') { sessions.clear(); return send(res, 200, { ok: true }); }
@@ -46,9 +52,53 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/auth/me') return send(res, 200, { user });
   if (url.pathname === '/auth/logout') { sessions.delete(token); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
   if (url.pathname === '/auth/password') { sessions.clear(); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
-  if (user.role !== 'admin' && ['/users', '/integrations', '/integrations/slack/test', '/notifications'].some(path => url.pathname === path || (path === '/users' && url.pathname.startsWith('/users/')))) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && ['/users', '/integrations', '/notifications', '/scanner-tokens', '/github-sync'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
   if (user.role === 'viewer' && req.method !== 'GET' && !url.pathname.startsWith('/saved-views')) return send(res, 403, { detail: 'Read-only account' });
   state.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body, actor: user.username, hasAuthorization: Boolean(req.headers.authorization), hasApiKey: Boolean(req.headers['x-api-key']), hasSpoofedUser: Boolean(req.headers['x-secops-user']) });
+  if (url.pathname === '/scanner-tokens') {
+    if (req.method === 'GET') {
+      if (state.failTokenList-- > 0) return send(res, 503, { detail: 'Token list temporarily unavailable' });
+      return send(res, 200, { count: state.scannerTokens.length, results: state.scannerTokens });
+    }
+    if (state.failTokenCreate-- > 0) return send(res, 503, { detail: 'Token creation temporarily unavailable' });
+    const token = { id: `${String(state.scannerTokens.length + 1).padStart(8, '0')}-3333-4333-8333-333333333333`, name: body.name, project: body.project, created_at: '2026-01-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z', revoked_at: null, last_used_at: null, active: true };
+    state.scannerTokens.unshift(token);
+    return send(res, 201, { token: `scanner-fixture-secret-${++state.tokenVersion}`, scanner_token: token });
+  }
+  if (url.pathname.startsWith('/scanner-tokens/')) {
+    const token = state.scannerTokens.find(item => item.id === url.pathname.split('/')[2]);
+    if (!token) return send(res, 404, { detail: 'Token not found' });
+    if (url.pathname.endsWith('/rotate')) {
+      if (state.failTokenRotate-- > 0) return send(res, 503, { detail: 'Token rotation temporarily unavailable' });
+      Object.assign(token, { active: true, revoked_at: null, last_used_at: null });
+      return send(res, 201, { token: `scanner-fixture-secret-${++state.tokenVersion}`, scanner_token: token });
+    }
+    Object.assign(token, { active: false, revoked_at: '2026-01-02T00:00:00Z' }); return send(res, 200, { ok: true });
+  }
+  if (url.pathname === '/github-sync') {
+    if (req.method === 'GET') {
+      if (state.failGithubList-- > 0) return send(res, 503, { detail: 'GitHub connections temporarily unavailable' });
+      return send(res, 200, { configured: state.githubConfigured, count: state.githubConnections.length, results: state.githubConnections });
+    }
+    const connection = { id: `${String(state.githubConnections.length + 1).padStart(8, '0')}-4444-4444-8444-444444444444`, ...body, enabled: true, status: 'queued', next_sync_at: '2026-01-01T00:00:00Z', last_synced_at: null, last_error: null };
+    state.githubConnections.unshift(connection); return send(res, 201, { connection });
+  }
+  if (url.pathname.startsWith('/github-sync/')) {
+    const connection = state.githubConnections.find(item => item.id === url.pathname.split('/')[2]);
+    if (!connection) return send(res, 404, { detail: 'GitHub connection not found' });
+    if (url.pathname.endsWith('/runs')) {
+      if (state.failGithubRuns-- > 0) return send(res, 503, { detail: 'Sync history temporarily unavailable' });
+      return send(res, 200, { results: state.githubRuns[connection.id] || [] });
+    }
+    if (url.pathname.endsWith('/sync')) {
+      if (state.failGithubSync-- > 0) return send(res, 503, { detail: 'GitHub sync temporarily unavailable' });
+      if (!state.githubConfigured) return send(res, 503, { detail: 'GitHub access is not configured' });
+      if (!connection.enabled || ['queued', 'syncing'].includes(connection.status)) return send(res, 409, { detail: 'Connection is paused or busy' });
+      connection.status = 'queued'; return send(res, 202, { ok: true, message: 'Sync queued' });
+    }
+    Object.assign(connection, body); if ('enabled' in body) connection.status = body.enabled ? 'queued' : 'idle';
+    return send(res, 200, { connection });
+  }
   if (url.pathname === '/saved-views') {
     if (req.method === 'GET') return send(res, 200, { results: savedViews.filter(view => view.owner === user.id) });
     const view = { id: `${String(nextView++).padStart(8, '0')}-2222-4222-8222-222222222222`, ...body, owner: user.id }; savedViews.push(view); return send(res, 200, view);

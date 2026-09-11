@@ -38,6 +38,15 @@ def main() -> None:
     assert session.has_nonstandard_attr("HttpOnly")
     assert session.get_nonstandard_attr("SameSite").lower() == "strict"
     assert request("/api/auth/me")[1]["user"]["role"] == "admin"
+    status, sync = request("/api/github-sync")
+    assert status == 200 and sync["configured"] is False and sync["count"] == 0
+    status, connection = request("/api/github-sync", body={
+        "repository": "synthetic-ci/no-network-requests", "project": "ci-smoke",
+        "sources": ["code_scanning"], "interval_minutes": 60,
+    })
+    assert status == 201
+    assert request(f"/api/github-sync/{connection['connection']['id']}/sync", body={})[0] == 503
+    assert request("/api/github-sync")[1]["count"] == 1
     status, initial = request("/api/findings?project=ci-smoke")
     assert status == 200 and initial["count"] == 0, "Smoke tests require a fresh disposable database"
     payload = {
@@ -54,7 +63,19 @@ def main() -> None:
     finding = findings["results"][0]
     assert finding["title"] == payload["title"]
     assert finding["occurrences"] == 1, "Rejected cross-origin request must not write data"
-    assert request("/ingest/signal", body=payload, api_key=ingest_key)[0] == 200
+    status, scanner = request("/api/scanner-tokens", body={
+        "name": "CI disposable scanner", "project": "ci-smoke", "expires_in_days": 1,
+    })
+    assert status == 201
+    scanner_key = scanner["token"]
+    assert request("/findings", api_key=scanner_key)[0] == 401
+    # Project authorization intentionally conceals inaccessible resources with 404.
+    assert request("/ingest/signal", body={**payload, "project": "forbidden-project"}, api_key=scanner_key)[0] == 404
+    status, forbidden = request("/api/findings?project=forbidden-project")
+    assert status == 200 and forbidden["count"] == 0, "Rejected scanner scope must not create findings"
+    assert request("/ingest/signal", body=payload, api_key=scanner_key)[0] == 200
+    assert request(f"/api/scanner-tokens/{scanner['scanner_token']['id']}/revoke", body={})[0] == 200
+    assert request("/ingest/signal", body=payload, api_key=scanner_key)[0] == 401
     status, replay = request("/api/findings?project=ci-smoke")
     assert status == 200 and replay["count"] == 1
     assert replay["results"][0]["id"] == finding["id"]
@@ -76,7 +97,7 @@ def main() -> None:
     assert request("/api/auth/logout", body={}, request_origin="https://untrusted.invalid")[0] == 403
     assert request("/api/auth/logout", body={})[0] == 200
     assert request("/api/auth/me")[0] == 401
-    print("Compose cookie authentication/logout, origin enforcement, scanner key scope, ingestion/replay, comment audit and saved view passed")
+    print("Compose cookie authentication/logout, origins, scoped scanner-token revocation, idle sync configuration, ingestion/replay, comments and saved views passed")
 
 
 if __name__ == "__main__":
