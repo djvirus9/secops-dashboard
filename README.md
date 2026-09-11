@@ -10,7 +10,7 @@ instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
-See the [0.1.0 release notes](CHANGELOG.md) for features, runtime compatibility,
+See the [0.2.0 release notes](CHANGELOG.md) for team workflows, runtime compatibility,
 and upgrade notes.
 
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
@@ -34,8 +34,10 @@ python3 scripts/local.py credentials
 python3 scripts/local.py seed  # optional synthetic findings in project "demo"
 ```
 
-Open <http://127.0.0.1:5050> and sign in with the generated credentials shown by
-`credentials` in your terminal. That command avoids printing credentials when
+Open <http://127.0.0.1:5050/login> and sign in with the initial administrator
+credentials shown by `credentials` in your terminal. Change your password on the
+Profile page; the initial password shown by the helper then becomes obsolete.
+That command avoids printing credentials when
 its output is redirected. The API listens on <http://127.0.0.1:8000>; both services
 bind only to your computer. If a port is occupied, use
 `python3 scripts/local.py start --port 5051 --api-port 8001`.
@@ -52,8 +54,12 @@ python3 scripts/local.py status
 python3 scripts/local.py stop
 ```
 
-Stopping preserves your data and credentials. Starting again restores the same
-instance. Seeding again skips import when the demo project already has findings.
+Stopping preserves accounts, current passwords, sessions, and data. Starting
+again restores the same instance without resetting a changed password. Seeding
+uses the private backend API key and still works after password changes; it skips
+import when the demo project already has findings. To recover an account, run
+`python3 scripts/local.py reset-password --username admin` in your terminal and
+enter the new password twice. Recovery revokes that user's existing sessions.
 Keep `.local/`, `.env`, and database files private; review attachments and diffs
 before posting them to GitHub. For code changes and tests, see
 [CONTRIBUTING.md](CONTRIBUTING.md). For PostgreSQL or a server installation,
@@ -62,21 +68,41 @@ continue with Docker Compose below.
 ## Supported deployment
 
 This release is intended for **one trusted security team** on a single deployment.
-The dashboard uses one shared HTTP Basic account, so it does not provide individual
-user identities, SSO, MFA, or per-project access control. Projects separate finding
-and asset identity; they are not authorization boundaries. Use a private network
-or access gateway and HTTPS for every non-local deployment.
+Version 0.2 provides individual local accounts, administrator/analyst/viewer roles,
+and server-enforced project grants. Administrators can access every project and
+manage accounts; analysts can modify allowed projects; viewers can read them.
+An explicit empty grant list allows no projects. SSO, MFA, GitHub synchronization,
+and isolation between separate organizations are future work. Use a private
+network or access gateway and HTTPS for every non-local deployment.
 
-The frontend adds the administrative API key to backend requests server-side.
-Browsers never receive that key. Scanners use a separate `INGEST_API_KEY` accepted
-only by `POST /ingest/signal` and `POST /import/scan`. Administrative credentials
-can read and modify all projects. Keep scanner credentials out of browsers.
+The backend authenticates browser sessions with an HttpOnly, SameSite=Strict
+cookie. The frontend forwards that cookie and receives no administrative API key
+or bootstrap password. `API_KEY` remains an unrestricted administrative automation
+credential. Scanners use a separate `INGEST_API_KEY` accepted only by
+`POST /ingest/signal` and `POST /import/scan`; that shared key can ingest into any
+project. Keep both keys out of browsers and untrusted scanner jobs.
 
 Mutating browser requests must match an exact canonical origin in
 `DASHBOARD_ORIGINS`; request `Host` and forwarding headers do not establish trust.
 The Compose/manual default `http://localhost:5000` is for local use; the quickstart
 helper configures its own loopback origin on port 5050. Public deployments must
 set their own HTTPS origin explicitly.
+
+## Team workflows
+
+Administrators create accounts and project grants on the Users page. Each account
+can change its own password and keep private saved finding views (up to 100).
+Saved filters are always applied inside the current user's project grants.
+
+Administrators and analysts can select up to 200 explicit findings for a bulk
+triage action. The whole request is rejected if any selected finding is missing,
+unauthorized, or invalid; it does not silently update a subset. CSV export includes
+only allowed findings and is capped at 10,000 rows and 16 MiB. Narrow the filters
+if the limit is exceeded. Formula-like or control-prefixed cells are visibly
+prefixed with `[text]` so spreadsheets treat scanner text as data. Exported reports
+still contain sensitive security findings; handle them accordingly.
+
+See the [threat model](docs/threat-model.md) for trust boundaries and residual risks.
 
 ## Run with Docker Compose
 
@@ -95,9 +121,17 @@ openssl rand -hex 32  # generate a different value for each required secret
 
 Fill in `POSTGRES_PASSWORD`, `API_KEY`, `INGEST_API_KEY`, and `DASHBOARD_PASSWORD`
 in `.env`. Use independent generated values. API keys require at least 32
-characters; dashboard and PostgreSQL passwords require at least 24. Missing,
-short, duplicate API keys, and placeholder values fail validation. The example
+characters; PostgreSQL and initial bootstrap passwords require at least 24.
+Passwords created or changed through account management require 15–1,024
+characters; generated bootstrap passwords are recommended. Missing,
+short, duplicate API keys, and placeholder bootstrap values fail validation. The example
 leaves secrets empty intentionally.
+
+For a local Compose demo at `http://localhost:5000`, explicitly set
+`SESSION_COOKIE_SECURE=false` in `.env`. Keep its default `true` for HTTPS
+deployments. The insecure setting is accepted only when every configured origin
+is strict loopback HTTP. Session defaults are 12 hours absolute and 30 minutes
+idle; an idle timeout cannot exceed the absolute lifetime.
 
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml config --quiet
@@ -105,10 +139,15 @@ docker compose --env-file .env -f infra/docker-compose.yml up --build -d
 docker compose --env-file .env -f infra/docker-compose.yml ps
 ```
 
-Open <http://localhost:5000> and enter the configured dashboard credentials.
+Open <http://localhost:5000/login> and enter the initial administrator credentials.
 All published ports bind to loopback by default. The host-side TLS reverse proxy
 is the public entrypoint. Backend startup validates configuration and applies
 migrations; the frontend and worker wait for database readiness.
+
+`DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` bootstrap the first administrator
+only when the database contains no accounts. They never reset existing passwords
+on upgrade or restart. API-only installations can omit both values; supplying
+only one is rejected. See the runbook for account recovery and upgrades from 0.1.
 
 **Upgrading an existing installation:** take and verify a backup first. Older
 databases created with `create_all` need the explicit legacy adoption procedure
@@ -160,6 +199,7 @@ export INGEST_API_KEY="$(openssl rand -hex 32)"
 export DASHBOARD_USERNAME=admin
 export DASHBOARD_PASSWORD="$(openssl rand -hex 32)"
 export DASHBOARD_ORIGINS=http://localhost:5000
+export SESSION_COOKIE_SECURE=false
 export BACKEND_URL=http://localhost:8000
 export ALLOWED_HOSTS=localhost,127.0.0.1,testserver
 
@@ -169,7 +209,7 @@ pip install -r backend/requirements-dev.txt
 (cd backend && python -m app.deployment && alembic upgrade head && uvicorn app.main:app --reload)
 ```
 
-In another shell export the same authentication and origin variables, then run
+In another shell export only `BACKEND_URL` and `DASHBOARD_ORIGINS`, then run
 `cd frontend && npm ci && npm run dev`. To exercise notifications, start
 `python -m app.notifications.worker` from `backend` with the same database and
 integration settings. The dashboard runs on port 5000 and the API on port 8000.
@@ -204,8 +244,12 @@ with dependency audits, CodeQL, production browser tests, and Docker builds.
 
 - `GET /health` and `GET /ready`: public liveness and database/schema readiness.
 - `POST /ingest/signal`, `POST /import/scan`: ingestion-only credential access.
-- Findings, assets, risks, imports, comments, integration status, notification
-  review, and authenticated OpenAPI documentation: administrative access.
+- `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/password`:
+  browser account sessions and password changes.
+- Findings, assets, risks, imports, comments, and CSV export: role and project access.
+- Saved views: private to their owning user session.
+- Account management, integration status/tests, notification review, and authenticated
+  OpenAPI documentation: administrative access.
 - `MAX_IMPORT_REQUEST_BYTES`, `MAX_SCAN_BYTES`, and `MAX_FINDINGS_PER_IMPORT`
   independently cap HTTP payloads, decoded content, and database import work.
   `MAX_REQUEST_BYTES` also caps request bodies on every non-import route.

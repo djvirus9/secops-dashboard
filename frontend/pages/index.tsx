@@ -1,3 +1,4 @@
+import { useAuth } from "../lib/auth";
 import { useMemo, useState } from "react";
 import { apiPost } from "../lib/api";
 import Link from "next/link";
@@ -22,6 +23,7 @@ type SubmitResult = {
 };
 
 export default function Dashboard() {
+  const { canWrite } = useAuth();
   const { data: health, error: healthErr, loading: healthLoading, reload: reloadHealth } = useApiResource<Health>("/health");
   const { data: summary, error: summaryError, loading: summaryLoading, reload: loadSummary } = useApiResource<Summary>("/dashboard/summary");
   const [project, setProject] = useState("");
@@ -90,8 +92,8 @@ export default function Dashboard() {
         <MetricCard label="Assets" value={summary?.assets} tone="text-indigo-600 dark:text-indigo-400" />
       </div>
 
-      <div className="flex flex-wrap gap-3 text-sm"><Link href="/findings" className="button-secondary">Triage findings</Link><Link href="/integrations" className="button-secondary">Import scan results</Link></div>
-      <details className="rounded-xl border p-4 dark:border-gray-700"><summary className="cursor-pointer font-medium">Send a manual signal</summary>
+      <div className="flex flex-wrap gap-3 text-sm"><Link href="/findings" className="button-secondary">Triage findings</Link>{canWrite && <Link href="/integrations" className="button-secondary">Import scan results</Link>}</div>
+      {canWrite && <details className="rounded-xl border p-4 dark:border-gray-700"><summary className="cursor-pointer font-medium">Send a manual signal</summary>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Card title="Manual signal">
           <div className="grid gap-3">
@@ -162,7 +164,7 @@ export default function Dashboard() {
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">This becomes normalized into Finding + Risk on the backend.</p>
         </Card>
       </div>
-      </details>
+      </details>}
     </div>
   );
 }

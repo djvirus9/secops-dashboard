@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 — 2026-09-11
+
+- Replace shared browser Basic authentication with individual local accounts,
+  admin/analyst/viewer roles, project grants, Argon2 password hashes, and revocable
+  HttpOnly/SameSite=Strict sessions with absolute and idle expiry.
+- Add account administration, password changes and operator recovery, private
+  saved finding views, atomic bulk triage, and bounded CSV export with visible
+  `[text]` prefixes for spreadsheet formula-like cells.
+- Remove administrative keys and bootstrap passwords from the frontend process.
+  Keep direct automation/scanner API credentials, with browser origin checks
+  enforced independently of proxy headers.
+- Migrate existing findings unchanged. Existing dashboard credentials bootstrap
+  the first administrator only when no accounts exist; upgrades and restarts do
+  not overwrite changed account passwords. Local seeding uses the private API key.
+- Add session/project authorization, workflow, deployment and local-restart
+  regressions, plus a documented threat model and account recovery procedure.
+
+Before upgrading, verify a backup and configure the backend bootstrap pair and
+canonical origins. Secure cookies default to `true`; plain loopback HTTP testing
+requires explicit `SESSION_COOKIE_SECURE=false`. This remains a shared deployment
+for one trusted team; SSO, MFA, organization isolation and GitHub sync are not included.
+
 ## 0.1.0 — 2026-09-10
 
 First public release under the MIT License, for a self-hosted instance used by

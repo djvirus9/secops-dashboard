@@ -4,16 +4,19 @@
 
 Deploy one backend and notification worker for a trusted security team, with
 PostgreSQL persistence and a TLS reverse proxy in front of Next.js. Projects are
-identity and filtering fields; every administrator can access every project.
-The shared Basic account supplies a shared audit identity. Individual accountability,
-SSO, MFA, tenant isolation, and high availability require additional work before
-using this as a multi-organization service.
+both identity namespaces and access grants for local user accounts. Administrators
+can access every project; analysts can modify granted projects and viewers can
+read them. User actions record the authenticated username. SSO, MFA, GitHub sync,
+tenant isolation, and high availability require additional work before using this
+as a multi-organization service. See the [threat model](threat-model.md).
 
 Use generated credentials and protect `.env` with mode `0600`. Keep this file,
 database volumes, and backups outside source control. The example secrets are
 empty and startup rejects missing/short/placeholder secrets. API keys must have
-at least 32 characters and be distinct; dashboard/PostgreSQL passwords need at
-least 24. `openssl rand -hex 32` produces a suitable independent value for each.
+at least 32 characters and be distinct; PostgreSQL and initial bootstrap passwords
+need at least 24. Passwords created/changed through account management require
+15–1,024 characters. `openssl rand -hex 32` produces a
+suitable independent bootstrap password or API/database secret.
 Do not use output from `docker compose config` in logs; use `config --quiet` to
 validate configuration without displaying environment secrets.
 
@@ -23,12 +26,13 @@ validate configuration without displaying environment secrets.
 2. Set `DASHBOARD_ORIGINS=https://dashboard.example.com` to the real public
    origin, without a path, wildcard, or trailing slash. Multiple explicitly
    trusted origins can be comma-separated. Keep `DASHBOARD_BIND_ADDRESS=127.0.0.1`.
+   Keep `SESSION_COOKIE_SECURE=true`; browser sessions require HTTPS in this mode.
 3. Adapt [infra/Caddyfile.example](../infra/Caddyfile.example) to the real hostname,
    validate it, and install it using your host's Caddy service. Caddy must run on
    the host for its `127.0.0.1:5000` upstream to reach the published frontend port.
 4. Expose only the proxy's HTTP/HTTPS ports publicly. Backend and PostgreSQL
    remain loopback-bound. Network policy or a private access gateway can further
-   restrict the dashboard; application Basic authentication remains required.
+   restrict the dashboard; application account authentication remains required.
 5. Sign in through the canonical HTTPS origin and perform an import and triage
    action. A correct proxy must preserve the browser's `Origin` header.
 
@@ -41,6 +45,64 @@ host operator. The application never trusts client-supplied `Host`,
 If a legitimate browser mutation returns 403, compare its actual origin with
 `DASHBOARD_ORIGINS`, including scheme and port. Correct the canonical setting;
 do not add attacker-controlled origins or enable unrestricted CORS.
+
+For a disposable local Compose test over `http://localhost:5000`, explicitly set
+`SESSION_COOKIE_SECURE=false`. Startup accepts this only when all configured
+origins use HTTP with host exactly `localhost`, `127.0.0.1`, or `::1`. Never use it
+for a network hostname. The local helper supplies this setting for its own
+loopback origins. Cookie scope is the whole application path, HttpOnly and
+SameSite=Strict; no frontend JavaScript can read the session token.
+
+## Accounts and project access
+
+On a fresh database, `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` create the first
+administrator. With existing accounts, startup leaves passwords and roles alone.
+The pair is optional for API-only deployments; a partial pair fails validation.
+Configure both before the first browser login, then use the Users page to create
+individual accounts. Use Profile to change your own password and sign in again.
+Changing `.env` is not an account password reset.
+
+| Role | Findings, assets, risks, imports, CSV | Changes | Account/integration/notification administration |
+| --- | --- | --- | --- |
+| Administrator | Every project | Every project, including bulk triage | Allowed |
+| Analyst | Granted projects | Granted projects, including imports and bulk triage | Denied |
+| Viewer | Granted projects | Read-only finding data | Denied |
+
+All user roles can manage their own saved views. Administrators always have all
+projects. For other roles, `projects: null` grants all projects, `[]` grants none,
+and an explicit list grants only exact project names. Include the empty string
+`""` explicitly when an account should access historical unscoped findings.
+Saved filters cannot expand those grants. The last active administrator cannot
+be disabled or demoted.
+
+Sessions expire after 43,200 seconds absolute or 1,800 seconds idle by default.
+`SESSION_TTL_SECONDS` accepts 300–604,800 and `SESSION_IDLE_TIMEOUT_SECONDS` accepts
+60–86,400; idle must not exceed the absolute lifetime. Password changes/recovery,
+account disablement, and role/project changes revoke the affected user's sessions.
+Logout revokes the current session. Valid sessions persist across service restarts.
+
+For a local helper installation, recover a password from an interactive terminal:
+
+```bash
+python3 scripts/local.py reset-password --username admin
+```
+
+For Compose, use the backend's configured database environment and interactive
+prompts; do not pass the new password on the command line:
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml exec backend python -m app.accounts reset-password --username admin
+```
+
+Both commands prompt twice, update an existing account, and revoke its sessions.
+The local helper reads only its own `.local` configuration and never resets a
+password automatically. Its `credentials` command shows the initial bootstrap
+value, which becomes obsolete after an account password change.
+
+Keep `API_KEY` limited to trusted administrative automation: it bypasses user
+project grants and records actor `api-admin`. `INGEST_API_KEY` can ingest into
+any project and records actor `scanner`; it cannot read findings or manage users.
+Neither key is passed to the frontend. `X-SecOps-User` cannot choose an audit actor.
 
 ## Start and verify
 
@@ -107,6 +169,15 @@ switch does not certify those formats or versions. XML DTD/entities remain
 rejected. `STORE_RAW_SCAN_DATA=false` limits retained raw evidence; normalized
 findings and notification jobs can still contain sensitive security information.
 
+Private saved views are limited to 100 per account. Bulk triage accepts at most
+200 explicit finding IDs and commits all authorized changes together; it rejects
+missing, forbidden, or invalid targets rather than silently skipping them. CSV
+exports apply the user's current project grants and fail above 10,000 rows or
+16 MiB. Narrow the filter and retry; results are not silently truncated. Every
+cell is quoted and formula-like/control-prefixed text receives a visible `[text]`
+prefix. Export omits raw scanner payloads and descriptions, but still contains
+sensitive security metadata and is not a database backup.
+
 ## Backups and restore verification
 
 Schedule backups to protected storage and define recovery objectives and retention
@@ -117,6 +188,12 @@ alongside the backup inventory. Preserve credentials separately in your secret
 manager. Retention and scheduled backups are operator responsibilities; the app
 does not automatically purge historical records.
 
+Version 0.2 backups also contain password hashes, project grants, session records,
+saved views, and audit history. Protect them as authentication data. A restored
+database can reinstate sessions that were valid when the backup was taken;
+revoke affected accounts' sessions through password recovery before resuming
+access when a compromise or stale-session risk motivated the recovery.
+
 ```bash
 infra/backup.sh /secure/backups/secops-before-upgrade.dump
 infra/verify-restore.sh /secure/backups/secops-before-upgrade.dump
@@ -124,13 +201,16 @@ infra/verify-restore.sh /secure/backups/secops-before-upgrade.dump
 
 `backup.sh` uses `pg_dump --format=custom`, rejects an existing output filename,
 and checks archive readability before publishing the file. `verify-restore.sh`
-restores into a newly created temporary database, checks the findings/comments
-tables, and removes only that temporary database afterward. It never replaces
+restores into a newly created temporary database, checks findings, comments,
+users, sessions and saved views, and removes only that temporary database afterward. It never replaces
 the active database. Use `SECOPS_ENV_FILE=/path/to/operator.env` if needed.
 Set `SECOPS_EXPECTED_FINDINGS` and `SECOPS_EXPECTED_COMMENTS` to known backup row
-counts to require an exact match; a mismatch fails verification and still removes
-the temporary restore database. CI uses this to assert that its synthetic finding
-and comment both survive the backup/restore cycle.
+counts to require an exact match. `SECOPS_EXPECTED_USERS`, `SECOPS_EXPECTED_SESSIONS`,
+and `SECOPS_EXPECTED_SAVED_VIEWS` optionally check the new identity/workflow tables;
+session counts include revoked sessions. A mismatch fails verification and still
+removes the temporary restore database. Older 0.1 backups without these tables
+report zero and explicitly report the table as absent. CI requires one synthetic
+finding, comment, user, revoked session and private saved view to survive restore.
 These scripts require the configured PostgreSQL role to create/drop databases;
 use a separate operator environment when your database service restricts that
 privilege. Review row counts and test a representative restored finding before
@@ -198,6 +278,13 @@ scanner locations such as CredScan file paths, can create a distinct identity.
 Historical findings are not automatically merged or closed. Review their triage
 state when adopting project-scoped ingestion or corrected evidence locations.
 
+Revision 0004 adds accounts, sessions, login throttles, saved views, and audit
+events without assigning historical findings to new projects. Before the first
+0.2 start, preserve the previous `DASHBOARD_USERNAME`/`DASHBOARD_PASSWORD` as the
+backend bootstrap pair. The first administrator can see all historical projects.
+Create analyst/viewer grants deliberately, including `""` when unscoped records
+should be visible. Subsequent starts never reapply the bootstrap password.
+
 Schema changes may make an older binary incompatible. Roll back by restoring a
 verified backup into a new database and using the matching old release. A schema
 downgrade can discard new fields/history and is not a substitute for restoring
@@ -228,10 +315,12 @@ and worker; recreate the affected services after changing them.
 
 ## Credential rotation and release checks
 
-Rotate the administrative key in backend and frontend together, and the scoped
-ingest key in backend and scanner clients together. Rotate the dashboard password
-when shared access changes. Recreate affected services after updating their
-environment; changing `.env` alone does not update a running process.
+Rotate the administrative key in backend and trusted automation clients together,
+and the ingestion key in backend and scanner clients together. The frontend has
+neither key. Disable accounts when access ends; change/reset passwords through
+the account workflow to revoke sessions. Recreate affected services after updating
+API-key environments; changing `.env` alone does not update a running process or
+reset a user password.
 
 Changing `POSTGRES_PASSWORD` in `.env` does **not** rotate an initialized database
 role. Use PostgreSQL's interactive `\password` command through a trusted operator
@@ -240,8 +329,11 @@ Avoid putting secret values into SQL command history, shell logs, or Git.
 
 For each release, require green PostgreSQL migrations/schema-parity/API tests,
 versioned parser fixtures, frontend production browser tests, dependency audits,
-and image builds. CI additionally boots the Compose stack, exercises authenticated
-proxy ingestion/reads, and tests backup/restore against its disposable database.
+and image builds. CI additionally boots the Compose stack, exercises browser
+cookie login/logout and direct scoped-key ingestion, and tests backup/restore
+against its disposable database. The local quickstart check changes an account
+password, restarts services, and verifies current sessions and data survive
+without restoring the obsolete bootstrap password.
 Before a public rollout, verify the real TLS hostname, origin configuration,
 representative scanner outputs, integrations, restored backup, and available host
 capacity in your own environment. CI uses synthetic data and integration stubs.

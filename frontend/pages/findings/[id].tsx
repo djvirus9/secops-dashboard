@@ -1,3 +1,4 @@
+import { useAuth } from "../../lib/auth";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -72,6 +73,7 @@ function safeReference(value: string): string | null {
 }
 
 export default function FindingDetailPage() {
+  const { canWrite, isAdmin } = useAuth();
   const router = useRouter();
   const { id } = router.query;
 
@@ -284,7 +286,7 @@ export default function FindingDetailPage() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
+      {canWrite && <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Triage Actions</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -324,13 +326,13 @@ export default function FindingDetailPage() {
         >
           {saving ? "Saving..." : "Update Finding"}
         </button>
-      </div>
+      </div>}
 
-      {Boolean(finding.notifications?.length) && <section className="rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800"><h2 className="font-semibold">Notification delivery</h2><ul className="my-3 space-y-1 text-sm">{finding.notifications?.map((delivery) => <li key={delivery.id}>{delivery.channel}: {delivery.status.replaceAll("_", " ")}</li>)}</ul><Link href="/notifications" className="text-sm text-indigo-600 underline dark:text-indigo-400">Review delivery status</Link></section>}
+      {isAdmin && Boolean(finding.notifications?.length) && <section className="rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800"><h2 className="font-semibold">Notification delivery</h2><ul className="my-3 space-y-1 text-sm">{finding.notifications?.map((delivery) => <li key={delivery.id}>{delivery.channel}: {delivery.status.replaceAll("_", " ")}</li>)}</ul><Link href="/notifications" className="text-sm text-indigo-600 underline dark:text-indigo-400">Review delivery status</Link></section>}
       <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Activity &amp; Comments</h2>
 
-        <div className="space-y-4 border-b dark:border-gray-700 pb-4">
+        {canWrite && <div className="space-y-4 border-b dark:border-gray-700 pb-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <input
               type="text"
@@ -350,7 +352,7 @@ export default function FindingDetailPage() {
               Add Comment
             </button>
           </div>
-        </div>
+        </div>}
 
         <div className="space-y-3">
           {finding.comments.length === 0 ? (

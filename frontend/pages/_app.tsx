@@ -1,6 +1,8 @@
 import type { AppProps } from "next/app";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { AuthProvider, useAuth } from "../lib/auth";
+import { ErrorNotice } from "../components/feedback";
 import "../styles/globals.css";
 
 const nav = [
@@ -11,9 +13,16 @@ const nav = [
   { href: "/integrations", label: "Integrations" },
   { href: "/imports", label: "Imports" },
   { href: "/notifications", label: "Delivery" },
+  { href: "/users", label: "Users" },
+  { href: "/profile", label: "Account" },
 ];
 
-export default function App({ Component, pageProps, router }: AppProps) {
+export default function App(props: AppProps) { return <AuthProvider><AppShell {...props} /></AuthProvider>; }
+
+function AppShell({ Component, pageProps, router }: AppProps) {
+  const auth = useAuth();
+  const [logoutError, setLogoutError] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [themeReady, setThemeReady] = useState(false);
 
@@ -40,7 +49,7 @@ export default function App({ Component, pageProps, router }: AppProps) {
           <div className="font-semibold text-gray-900 dark:text-white">SecOps Dashboard</div>
           <div className="flex w-full min-w-0 items-start gap-2 lg:w-auto">
             <nav aria-label="Main navigation" className="flex min-w-0 flex-1 flex-wrap gap-2">
-              {nav.map((n) => {
+              {auth.user && nav.filter(n => auth.isAdmin || !["/users", "/notifications"].includes(n.href)).map((n) => {
                 const active = router.pathname === n.href || (n.href !== "/" && router.pathname.startsWith(`${n.href}/`));
                 return (
                   <Link
@@ -54,7 +63,7 @@ export default function App({ Component, pageProps, router }: AppProps) {
                         : "bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 dark:border-gray-600")
                     }
                   >
-                    {n.label}
+                    {n.href === "/integrations" && !auth.isAdmin ? auth.canWrite ? "Import scans" : "Scanners" : n.label}
                   </Link>
                 );
               })}
@@ -77,10 +86,20 @@ export default function App({ Component, pageProps, router }: AppProps) {
             </button>
           </div>
         </div>
+        {auth.user && <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-end gap-3 px-4 pb-3 text-sm sm:px-6">
+          <span>{auth.user.username} · {auth.user.role}</span>
+          <button className="button-secondary" disabled={loggingOut} onClick={async () => {
+            setLoggingOut(true); setLogoutError("");
+            try { await auth.logout(); } catch (reason) { setLogoutError(reason instanceof Error ? reason.message : "Sign out failed"); }
+            finally { setLoggingOut(false); }
+          }}>Sign out</button>
+          <ErrorNotice message={logoutError} />
+        </div>}
       </header>
 
       <main id="main-content" className="mx-auto min-w-0 max-w-6xl px-4 sm:px-6 py-8">
-        <Component {...pageProps} />
+        {router.pathname === "/login" ? <Component {...pageProps} /> : auth.loading ? <p role="status">Checking your session…</p> : auth.error ? <ErrorNotice message={auth.error} retry={() => void auth.reload()} /> : auth.user ?
+          !auth.isAdmin && ["/users", "/notifications"].includes(router.pathname) ? <p role="alert">This page is available to administrators.</p> : <Component {...pageProps} /> : <p role="status">Redirecting to sign in…</p>}
       </main>
     </div>
   );

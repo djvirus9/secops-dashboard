@@ -1,3 +1,4 @@
+import { useAuth } from "../lib/auth";
 import { useState } from "react";
 import Link from "next/link";
 import { useApiResource } from "../lib/use-api-resource";
@@ -10,12 +11,13 @@ type ImportRun = {
 };
 
 export default function ImportsPage() {
+  const { canWrite } = useAuth();
   const [offset, setOffset] = useState(0);
   const { data, error, loading, reload } = useApiResource<{ count: number; results: ImportRun[] }>("/imports", { offset, limit: 50 });
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold">Import history</h1>
-      <div className="flex gap-2"><Link href="/integrations" className="button-secondary">Import a scan</Link><button className="button-secondary" onClick={reload} disabled={loading}>Refresh</button></div>
+      <div className="flex gap-2">{canWrite && <Link href="/integrations" className="button-secondary">Import a scan</Link>}<button className="button-secondary" onClick={reload} disabled={loading}>Refresh</button></div>
     </div>
     <p className="text-sm text-gray-600 dark:text-gray-400">Review scan processing results, failures, and the number of findings added or matched.</p>
     <ErrorNotice message={error} retry={reload} />

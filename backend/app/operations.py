@@ -2,11 +2,12 @@
 from typing import Literal, Optional
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, update
 
 from .db import SessionLocal
+from .access import project_filters, require_admin
 from .models import ImportRun, NotificationDelivery
 from .limits import positive_int_setting
 from .notifications.outbox import serialize_delivery, utcnow
@@ -15,9 +16,11 @@ router = APIRouter()
 
 
 @router.get("/imports")
-def list_imports(limit: int = 50, offset: int = 0, project: Optional[str] = None):
+def list_imports(request: Request, limit: int = 50, offset: int = 0, project: Optional[str] = None):
     limit, offset = max(1, min(limit, 200)), max(0, offset)
-    filters = [ImportRun.project == project] if project is not None else []
+    filters = project_filters(request, ImportRun.project)
+    if project is not None:
+        filters.append(ImportRun.project == project)
     with SessionLocal() as db:
         cutoff = utcnow() - timedelta(seconds=positive_int_setting("IMPORT_TIMEOUT_SECONDS", 900))
         rows = db.scalars(select(ImportRun).where(*filters)
@@ -36,9 +39,11 @@ def list_imports(limit: int = 50, offset: int = 0, project: Optional[str] = None
 
 @router.get("/notifications")
 def list_notifications(
+    request: Request,
     limit: int = 50, offset: int = 0, finding_id: Optional[str] = None,
     status: Optional[Literal["pending", "processing", "sent", "failed", "needs_review"]] = None,
 ):
+    require_admin(request)
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     filters = []
     if finding_id:
@@ -60,7 +65,8 @@ class DeliveryRetry(BaseModel):
 
 
 @router.post("/notifications/{notification_id}/retry")
-def retry_notification(notification_id: str, payload: DeliveryRetry):
+def retry_notification(notification_id: str, payload: DeliveryRetry, request: Request):
+    require_admin(request)
     with SessionLocal.begin() as db:
         row = db.scalar(select(NotificationDelivery).where(NotificationDelivery.id == notification_id)
                         .with_for_update())

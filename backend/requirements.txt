@@ -7,4 +7,5 @@ SQLAlchemy==2.0.52
 psycopg2-binary==2.9.12
 httpx==0.28.1
 alembic==1.19.2
+argon2-cffi==25.1.0
 defusedxml==0.7.1

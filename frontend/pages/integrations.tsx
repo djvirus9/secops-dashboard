@@ -1,3 +1,4 @@
+import { useAuth } from "../lib/auth";
 import { useState } from "react";
 import Link from "next/link";
 import { apiPost } from "../lib/api";
@@ -74,11 +75,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function Integrations() {
-  const { data: status, error: statusError, loading: statusLoading, reload: reloadStatus } = useApiResource<IntegrationStatus>("/integrations");
+  const { isAdmin, canWrite } = useAuth();
+  const { data: status, error: statusError, loading: statusLoading, reload: reloadStatus } = useApiResource<IntegrationStatus>("/integrations", undefined, isAdmin);
   const { data: parsers, error: parsersError, loading: parsersLoading, reload: reloadParsers } = useApiResource<ParsersResponse>("/parsers");
   const [testingSlack, setTestingSlack] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<"notifications" | "scanners" | "import">("notifications");
+  const [activeTab, setActiveTab] = useState<"notifications" | "scanners" | "import">(isAdmin ? "notifications" : canWrite ? "import" : "scanners");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [scanContent, setScanContent] = useState("");
   const [selectedParser, setSelectedParser] = useState("");
@@ -134,7 +136,7 @@ export default function Integrations() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Integrations</h1>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Integration views">
-          <button
+          {isAdmin && <button
             onClick={() => setActiveTab("notifications")}
             aria-pressed={activeTab === "notifications"}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -144,7 +146,7 @@ export default function Integrations() {
             }`}
           >
             Notifications
-          </button>
+          </button>}
           <button
             onClick={() => setActiveTab("scanners")}
             aria-pressed={activeTab === "scanners"}
@@ -156,7 +158,7 @@ export default function Integrations() {
           >
             Scanners{parsers ? ` (${parsers.count})` : ""}
           </button>
-          <button
+          {canWrite && <button
             onClick={() => setActiveTab("import")}
             aria-pressed={activeTab === "import"}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -166,15 +168,15 @@ export default function Integrations() {
             }`}
           >
             Import Scans
-          </button>
+          </button>}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3 text-sm"><Link href="/imports" className="text-indigo-600 underline dark:text-indigo-400">Import history</Link><Link href="/notifications" className="text-indigo-600 underline dark:text-indigo-400">Notification delivery</Link></div>
+      <div className="flex flex-wrap gap-3 text-sm"><Link href="/imports" className="text-indigo-600 underline dark:text-indigo-400">Import history</Link>{isAdmin && <Link href="/notifications" className="text-indigo-600 underline dark:text-indigo-400">Notification delivery</Link>}</div>
       <ErrorNotice message={statusError ? `Integration status unavailable: ${statusError}` : ""} retry={reloadStatus} />
       <ErrorNotice message={parsersError ? `Scanner catalog unavailable: ${parsersError}` : ""} retry={reloadParsers} />
       {((activeTab === "notifications" && statusLoading) || (activeTab !== "notifications" && parsersLoading)) && <p role="status">Loading configuration…</p>}
-      {activeTab === "notifications" && status && (
+      {isAdmin && activeTab === "notifications" && status && (
         <>
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Configure external integrations to receive notifications when critical or high severity findings are detected.
@@ -350,7 +352,7 @@ export default function Integrations() {
         </>
       )}
 
-      {activeTab === "import" && (
+      {canWrite && activeTab === "import" && (
         <>
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Import results from an enabled scanner. Choose a parser or let the server detect a verified format.

@@ -71,7 +71,7 @@ def test_comment_author_comes_from_authenticated_identity(client, auth_headers):
     )
 
     assert response.status_code == 200
-    assert response.json()["comment"]["author"] == "dashboard-admin"
+    assert response.json()["comment"]["author"] == "api-admin"
     spoofed = client.post(
         f"/findings/{created['finding_id']}/comments",
         headers=headers,
