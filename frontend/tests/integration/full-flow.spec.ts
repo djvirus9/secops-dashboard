@@ -30,14 +30,14 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
   await page.goto('/findings');
   await page.getByLabel('Project', { exact: true }).fill('browser-project');
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('51–100 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('51–100 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('101–121 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('101–121 of 121');
   await page.getByLabel('Search findings').fill('Browser finding 001');
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect(page.getByRole('status')).toHaveText('1–1 of 1');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–1 of 1');
   await page.getByRole('link', { name: 'Browser finding 001', exact: true }).click();
   const detailUrl = page.url();
   await expect(page.getByText('Evidence from an isolated browser regression', { exact: true })).toBeVisible();
@@ -46,7 +46,7 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
   await expect(page.getByText('Confirmed by the browser regression', { exact: true })).toBeVisible();
   await page.getByLabel('Status', { exact: true }).selectOption('resolved');
   await page.getByRole('button', { name: 'Update Finding', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Finding updated.');
+  await expect(page.getByRole('status').filter({ hasText: /^Finding updated\.$/ })).toHaveText('Finding updated.');
   await importScan([fixtures[0]], 0);
   await page.goto(detailUrl);
   await expect(page.getByLabel('Status', { exact: true })).toHaveValue('open');
@@ -81,7 +81,9 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
     await page.getByLabel('Role', { exact: true }).selectOption(role);
     await page.getByLabel('Allowed projects (one per line)', { exact: true }).fill('browser-project');
     await page.getByRole('button', { name: 'Create account', exact: true }).click();
-    await expect(page.getByRole('status')).toHaveText('Account saved.');
+    await expect(page.getByRole('status').filter({ hasText: /^Account saved\.$/ })).toHaveText('Account saved.');
+    const accountRow = page.getByRole('row').filter({ has: page.getByRole('cell', { name: username, exact: true }) });
+    await expect(accountRow.getByRole('cell', { name: role, exact: true })).toBeVisible();
   };
   await createAccount('scoped-viewer', 'viewer');
   await createAccount('scoped-analyst', 'analyst');
@@ -104,7 +106,7 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
       await client.getByRole('button', { name: 'Sign in', exact: true }).click();
       await expect(client.getByRole('button', { name: 'Sign out' })).toBeVisible();
       await client.goto('/findings');
-      await expect(client.getByRole('status')).toHaveText('1–50 of 121');
+      await expect(client.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
       await expect(client.getByLabel('Saved view', { exact: true }).locator('option')).toHaveText(['Choose a view']);
       await expect(client.getByRole('navigation').getByRole('link', { name: 'Users', exact: true })).toHaveCount(0);
       expect((await client.request.get(`/api/findings/${hiddenId}`)).status()).toBe(404);

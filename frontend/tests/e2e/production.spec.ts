@@ -44,17 +44,17 @@ test('authentication and malformed deployment settings fail closed', async ({ re
 
 test('findings pagination reaches records after 100 and filters reset the offset', async ({ page, request }) => {
   await page.goto('/findings');
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('51–100 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('51–100 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('101–121 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('101–121 of 121');
   await expect(page.getByRole('link', { name: 'Finding 121', exact: true })).toBeVisible();
   await page.getByLabel('Search findings').fill('Finding 1');
   await page.getByLabel('Severity', { exact: true }).selectOption('high');
   await page.getByLabel('Project', { exact: true }).fill('payments');
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect(page.getByRole('status')).toHaveText('1–33 of 33');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
   const state = await (await request.get(`${backend}/__test/state`)).json();
   expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings').query).toMatchObject({ offset: '0', limit: '50', q: 'Finding 1', severity: 'high', project: 'payments', sort: 'risk_desc' });
 });
@@ -69,7 +69,7 @@ test('a failed finding save preserves the draft and allows a successful retry an
   await expect(page.getByLabel('Assignee', { exact: true })).toHaveValue('reviewer');
   await expect(page.getByRole('heading', { name: 'Finding 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Update Finding' }).click();
-  await expect(page.getByRole('status')).toHaveText('Finding updated.');
+  await expect(page.getByRole('status').filter({ hasText: /^Finding updated\.$/ })).toHaveText('Finding updated.');
   await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Comment', exact: true }).fill('Review complete');
   await page.getByRole('button', { name: 'Add Comment' }).click();
@@ -85,7 +85,7 @@ test('read failures are recoverable and integration failures preserve the scanne
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Findings temporarily unavailable');
   await expect(page.getByText('Loading findings…')).toHaveCount(0);
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.goto('/integrations');
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Integration service unavailable');
   await expect(page.getByText('Not configured', { exact: true })).toHaveCount(0);
@@ -103,9 +103,9 @@ test('read failures are recoverable and integration failures preserve the scanne
 
 test('asset pagination, cancel and create work through the authenticated browser proxy', async ({ page, request }) => {
   await page.goto('/assets');
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('51–100 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('51–100 of 121');
   await page.getByRole('button', { name: 'Edit Asset 51', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).first().click();
   await page.getByRole('button', { name: 'Add Asset', exact: true }).click();
@@ -115,7 +115,7 @@ test('asset pagination, cancel and create work through the authenticated browser
   await page.getByLabel('Key (unique identifier)', { exact: true }).fill('browser-created.invalid');
   await page.getByLabel('Project', { exact: true }).fill('browser-project');
   await page.getByRole('button', { name: 'Create Asset', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('1–50 of 122');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 122');
   const state = await (await request.get(`${backend}/__test/state`)).json();
   expect(state.assets[0]).toMatchObject({ key: 'browser-created.invalid', project: 'browser-project' });
 });
@@ -128,7 +128,7 @@ test('imports include project identity and disable unavailable parsers', async (
   await page.getByLabel('Parser (optional - auto-detect if empty)', { exact: true }).selectOption('bandit');
   await page.getByLabel('Scan Output (JSON, XML, CSV, or JSONL)', { exact: true }).fill('{"results":[]}');
   await page.getByRole('button', { name: 'Import Scan Results', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Imported fixture successfully');
+  await expect(page.getByRole('status').filter({ hasText: 'Imported fixture successfully' })).toContainText('Imported fixture successfully');
   const state = await (await request.get(`${backend}/__test/state`)).json();
   expect(state.requests.findLast((entry: { path: string }) => entry.path === '/import/scan')).toMatchObject({ path: '/import/scan', body: { project: 'payments-api', parser: 'bandit' } });
 });
@@ -225,7 +225,7 @@ test('login validates credentials, rejects external return paths and logout revo
 
 test('expired sessions return to login with findings filters intact', async ({ page, request }) => {
   await page.goto('/findings?project=payments&q=Finding%201');
-  await expect(page.getByRole('status')).toHaveText('1–33 of 33');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
   await request.post(`${backend}/__test/expire`);
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
@@ -306,7 +306,7 @@ test('viewer controls are read-only and analysts never fetch integration configu
   };
   await login('viewer');
   await page.goto('/findings');
-  await expect(page.getByRole('status')).toHaveText('1–50 of 121');
+  await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
   await expect(page.getByRole('checkbox', { name: /Select/ })).toHaveCount(0);
   await page.goto(`/findings/${findingId}`);
   await expect(page.getByRole('button', { name: 'Update Finding' })).toHaveCount(0);
