@@ -44,7 +44,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements*.txt
-      - run: pip install -r requirements-dev.txt pip-audit
+      - run: pip install -r requirements-dev.txt pip-audit uv
+      - name: Check Python dependency lockfile
+        run: uv lock --check --project ..
       - run: alembic upgrade head
       - run: alembic check
       - run: pytest -q
