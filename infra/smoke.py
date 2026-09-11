@@ -69,7 +69,10 @@ def main() -> None:
     assert status == 201
     scanner_key = scanner["token"]
     assert request("/findings", api_key=scanner_key)[0] == 401
-    assert request("/ingest/signal", body={**payload, "project": "forbidden-project"}, api_key=scanner_key)[0] == 403
+    # Project authorization intentionally conceals inaccessible resources with 404.
+    assert request("/ingest/signal", body={**payload, "project": "forbidden-project"}, api_key=scanner_key)[0] == 404
+    status, forbidden = request("/api/findings?project=forbidden-project")
+    assert status == 200 and forbidden["count"] == 0, "Rejected scanner scope must not create findings"
     assert request("/ingest/signal", body=payload, api_key=scanner_key)[0] == 200
     assert request(f"/api/scanner-tokens/{scanner['scanner_token']['id']}/revoke", body={})[0] == 200
     assert request("/ingest/signal", body=payload, api_key=scanner_key)[0] == 401
