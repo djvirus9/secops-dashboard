@@ -344,6 +344,6 @@ def test_identity_downgrade_refuses_persisted_data_before_schema_changes(migrati
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0004"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006"
         assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

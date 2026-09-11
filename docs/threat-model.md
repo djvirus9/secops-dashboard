@@ -1,9 +1,9 @@
-# Threat model: version 0.2
+# Threat model: version 0.3
 
 This model describes the repository's self-hosted architecture and its automated
 checks. It does not attest to a particular running server, cloud account, or
 operator's network configuration. The supported deployment serves one trusted
-team with local accounts and project grants. SSO, MFA, GitHub synchronization,
+team with local accounts and project grants. SSO, MFA,
 organization tenancy, and high availability are outside this release.
 
 ## Assets, actors, and boundaries
@@ -20,7 +20,8 @@ untrusted even when the scanner has a valid ingestion key.
 | Analyst | Viewer capabilities plus writes/imports/triage within granted projects |
 | Administrator | All projects, accounts, integrations, and notification administration |
 | Administrative automation | Full API authority across projects using `API_KEY`; fixed `api-admin` audit identity |
-| Scanner job | Ingestion into any project with `INGEST_API_KEY`; no read or account administration |
+| Scanner job | One-project ingestion with a revocable scanner token; legacy `INGEST_API_KEY` remains global for ingestion; neither allows reads or account administration |
+| GitHub sync administrator / worker | Administrator selects repository/project mappings; trusted worker reads fixed GitHub Cloud alert endpoints with one server token |
 | Host/database operator | Controls deployments, backups, and interactive account recovery; outside application ACL isolation |
 
 ```mermaid
@@ -32,6 +33,9 @@ flowchart LR
     api --> db[(PostgreSQL: findings, accounts, sessions, audit)]
     worker[Notification worker] --> db
     worker -->|Integration credentials| external[Slack / Jira]
+    github[GitHub sync worker] --> db
+    github -->|Server token; fixed HTTPS endpoints| cloud[api.github.com: alert data]
+    release[Tested main / publication workflow] -->|Attested image digests| host[Host deployment]
     operator[Host operator] -->|Backup, restore, recovery| db
 ```
 
@@ -40,7 +44,10 @@ administrative key. The backend checks roles and project grants independently
 of submitted filters and proxy headers. The database and worker are trusted
 components; PostgreSQL, backend, and frontend ports bind to loopback in the
 documented host-proxy setup. The local helper substitutes isolated SQLite and
-strict loopback HTTP, disables integrations, and keeps its secrets outside Git.
+strict loopback HTTP, disables Slack/Jira, and keeps its secrets outside Git.
+GitHub sync is opt-in through an owner-only token file. Only backend and GitHub
+worker receive that token. Repository/project mappings store no credential and
+cannot select a different API host. GitHub alert content is untrusted scanner data.
 
 ## Prioritized abuse cases
 
@@ -54,6 +61,10 @@ of application audit history and infrastructure logs.
 | 1. Take over an account or retain a stolen session after access changes | Medium / high / successful misuse may resemble normal activity | Argon2 password hashes, opaque database-backed revocable sessions, absolute/idle expiry, login throttling, revocation after password/account/grant changes; test expiry, logout, recovery, bootstrap-once, and concurrent last-admin protection |
 | 1. Trick a signed-in browser into a write or smuggle an administrative credential through the frontend | Medium / high / failed requests visible, attempts need monitoring | Exact configured origins for login and cookie writes, SameSite=Strict/HttpOnly cookies, Secure default, stripped proxy identity/API-key headers, no frontend bootstrap secrets; browser and Compose tests cover anonymous access, hostile origins, login/logout and header boundaries |
 | 1. Steal automation/integration secrets or sensitive evidence from logs, exports, backups, or public Git | Medium / high / often difficult to detect | Private local files, no secrets in CLI arguments/captured output, normalized secret redaction, raw payload storage disabled, no raw/description CSV fields; test proxy bypass, frontend env separation and secret-evidence handling; operator owns storage encryption and retention |
+| 1. Use a stolen scanner token to affect another project or retain access after rotation | Medium / high / stable scanner identity and last-use inventory aid review | Single exact-project ingestion scope, hash-only persistence, expiry/revocation/rotation and admin-only management; test forbidden reads, cross-project payloads, revoked/expired/rotated credentials and concurrent changes |
+| 1. Exfiltrate the GitHub token through a configured destination or malicious pagination/redirect | Low–medium / high / upstream failures visible, host compromise may not be | Fixed api.github.com endpoint construction, validated owner/repo identifiers, no arbitrary hosts, disabled redirect following, bounded pagination and sanitized failures; mocked hostile URL/redirect responses, local token permissions and environment-isolation tests |
+| 2. Duplicate alerts, overwrite another project's identity, or infer a false resolution after a partial sync | Medium / high / run history and source-state evidence aid review | Immutable repository/project/source mappings, stable source alert identity, transactional claims and cancellation, unchanged-replay deduplication, no resolution inferred from absence; test replay, source changes, interruption, pagination failure and competing workers |
+| 2. Deploy an untested or replaced image through a moving tag | Medium / high / attestations and digest inspection support detection | Exact tested-main gate, native smoke on both staged architectures, publish-once version tags, SBOM/provenance and deployed digest references; unit-test failed/missing CI, stale HEAD and tag replacement; operators verify package visibility/provenance and retain verified backups |
 | 2. Exhaust resources with login attempts, giant reports, repeated exports, or many saved views | Medium / medium–high / request failures and resource use are observable | Global/account login throttles, request/parser/import limits, import deadline, 100 saved views per user, 200 bulk IDs, 10,000-row/16-MiB CSV caps; test boundaries and rejected transactions; operator owns upstream rate limits and capacity monitoring |
 | 2. Execute spreadsheet formulas or browser markup embedded in scanner evidence | Medium / high / a user's workstation may be affected outside server logs | React text rendering, URL checks, fully quoted CSV and visible `[text]` prefixes for formula-like/control-leading values; test hostile cells, special quoting and browser rendering |
 | 2. Lose account state or reinstate revoked access during deployment/recovery | Low–medium / high / restore errors are detectable, stale access may not be | Data-preserving migrations, bootstrap only when no users exist, verified backups, interactive recovery with session revocation; local smoke changes a password and verifies sessions/data/re-login after restart |
@@ -63,8 +74,14 @@ of application audit history and infrastructure logs.
 
 - Administrators, host/database operators, and `API_KEY` remain globally trusted.
   Project grants do not isolate separate organizations from those actors. The
-  shared ingestion key can write to any project; protect scanner jobs and rotate
-  compromised keys. There is no per-scanner key inventory or project-scoped API key.
+  shared ingestion key can write to any project; prefer individual project-scoped
+  scanner tokens and revoke compromised credentials. Already accepted requests may
+  complete during revocation. Per-project tokens do not provide tenant isolation.
+- The optional GitHub token can read every repository granted to it at GitHub;
+  application administrators choose the destination project and its exposure.
+  Use least-privilege repository access and rotate the server credential. There
+  is no per-user GitHub OAuth identity or GitHub App installation boundary.
+  A worker heartbeat does not establish alert freshness or upstream permissions.
 - A stolen live user session can act until it expires or is revoked. HttpOnly
   limits token reads by JavaScript; it does not make same-origin script compromise
   harmless. MFA and federated identity are not present.
@@ -76,14 +93,17 @@ of application audit history and infrastructure logs.
   Redaction is targeted, not a guarantee that every secret or sensitive string
   is removed. Export prefixes are intentionally visible and must not be removed
   automatically before opening untrusted cells in a spreadsheet.
-- Backups include password hashes, grants, sessions and audit records. Restoring
+- Backups include password/token hashes, grants, sessions and audit records. Restoring
   an older database can restore access valid at backup time. Revoke affected
-  sessions when recovering from compromise. Audit tables are not tamper-proof
+  sessions and scanner credentials when recovering from compromise. Audit tables are not tamper-proof
   against a database/host administrator.
 - Slack delivery can repeat after interruption; uncertain Jira retries can
   create duplicates. No external service, retention schedule, TLS certificate,
   backup destination, recovery objective, or alerting system is provisioned by
   this source repository. Operators must choose and verify those controls.
+- SBOM/provenance describes contents and origin; it does not certify absence of
+  vulnerabilities. A repository/package administrator remains trusted to change
+  workflows or retag images. Use the reviewed release's immutable digest pair.
 
 No unresolved owner input is needed for the local demo. Before a network
 deployment, the operator must choose the trusted team, project grants, canonical

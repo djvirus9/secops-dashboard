@@ -5,7 +5,8 @@ umask 077
 secops_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 secops_output="${1:-${secops_root}/backups/secops-$(date -u +%Y%m%dT%H%M%SZ).dump}"
 secops_env="${SECOPS_ENV_FILE:-${secops_root}/.env}"
-secops_compose=(docker compose --env-file "$secops_env" -f "$secops_root/infra/docker-compose.yml")
+secops_file="${SECOPS_COMPOSE_FILE:-${secops_root}/infra/docker-compose.yml}"
+secops_compose=(docker compose --env-file "$secops_env" -f "$secops_file")
 
 if [[ -e "$secops_output" ]]; then
     echo "Refusing to replace an existing backup file" >&2

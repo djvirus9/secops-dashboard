@@ -26,15 +26,17 @@ source repository does not authorize testing other people's running deployments.
 ## Deployment boundary
 
 The application is intended for one trusted security team per deployment.
-Version 0.2 provides individual local accounts, roles, revocable browser sessions,
+The application provides individual local accounts, roles, revocable browser sessions,
 and project grants enforced by the backend. Administrators and administrative API
-keys can access all projects. The scanner key has unrestricted project scope for
-ingestion. SSO, MFA, GitHub synchronization, and isolation between separate
+keys can access all projects. Per-scanner tokens restrict ingestion to one project;
+the legacy shared ingestion key retains unrestricted project scope. GitHub Cloud
+alert synchronization uses one optional server-held credential and administrator-owned
+repository mappings. SSO, MFA and isolation between separate
 organizations are not provided. See the [threat model](docs/threat-model.md).
 
 The local helper binds services to loopback, keeps generated credentials and
 SQLite data in the Git-ignored `.local/` directory, and disables external
-notifications. Publishing a fork does not publish a running instance. Keep
+notifications; GitHub sync requires an explicit private token. Publishing a fork does not publish a running instance. Keep
 local configuration, database files, real scanner reports, and backups out of
 commits and issue attachments.
 

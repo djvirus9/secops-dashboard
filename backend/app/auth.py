@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .access import Principal, require_admin
 from .accounts import COOKIE_NAME, require_origin, session_principal
+from .scanner_tokens import scanner_principal
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ async def api_key_middleware(request: Request, call_next):
             provided.encode("utf-8"), ingest_key.encode("utf-8")
         ):
             identity = Principal(None, "scanner", "analyst", None, "scanner")
+        elif (method, path) in _INGEST_ONLY:
+            identity = await run_in_threadpool(scanner_principal, provided)
     else:
         token = request.cookies.get(COOKIE_NAME, "")
         if token:
@@ -89,7 +92,7 @@ async def api_key_middleware(request: Request, call_next):
             require_origin(request)
         if path in {"/docs", "/redoc", "/openapi.json"} or any(
             path == prefix or path.startswith(prefix + "/")
-            for prefix in ("/users", "/notifications", "/integrations", "/docs")
+            for prefix in ("/users", "/notifications", "/integrations", "/docs", "/scanner-tokens")
         ):
             require_admin(request)
     except HTTPException as exc:

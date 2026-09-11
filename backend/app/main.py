@@ -30,6 +30,8 @@ from .models import Asset, Comment, Finding, Signal, ImportRun, NotificationDeli
 from .notifications.outbox import enqueue, enqueue_finding, serialize_delivery
 from .operations import router as operations_router
 from .workflows import router as workflows_router
+from .scanner_tokens import router as scanner_tokens_router
+from .github_sync.routes import router as github_sync_router
 from .finding_query import FindingFilters, finding_filters, finding_order
 from .parsers import get_parser, list_parsers, parse_scan_results
 from .parsers.base import ParsedFinding, ParserRegistry, ScannerCategory
@@ -49,10 +51,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SecOps Dashboard API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="SecOps Dashboard API", version="0.3.0", lifespan=lifespan)
 app.include_router(operations_router)
 app.include_router(accounts_router)
 app.include_router(workflows_router)
+app.include_router(scanner_tokens_router)
+app.include_router(github_sync_router)
 
 
 @app.exception_handler(RequestValidationError)

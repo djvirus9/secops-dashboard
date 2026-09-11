@@ -17,6 +17,12 @@ from app.deployment import validate_backend_settings, validate_session_settings
     ("SESSION_TTL_SECONDS", "604801"),
     ("SESSION_IDLE_TIMEOUT_SECONDS", "59"),
     ("SESSION_IDLE_TIMEOUT_SECONDS", "86401"),
+    ("GITHUB_SYNC_POLL_SECONDS", "0"),
+    ("GITHUB_SYNC_POLL_SECONDS", "301"),
+    ("GITHUB_SYNC_TOKEN", "short"),
+    ("GITHUB_SYNC_TOKEN", "x" * 513),
+    ("GITHUB_SYNC_TOKEN", "x" * 32 + "\n"),
+    ("GITHUB_SYNC_TOKEN", "é" * 32),
 ])
 def test_invalid_deployment_configuration_is_rejected(monkeypatch, name, value):
     monkeypatch.setenv(name, value)

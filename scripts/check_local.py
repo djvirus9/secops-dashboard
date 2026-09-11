@@ -28,7 +28,7 @@ def main() -> None:
     os.environ.update(SLACK_WEBHOOK_URL="http://127.0.0.1:9/unintended-slack",
                       JIRA_BASE_URL="http://127.0.0.1:9/unintended-jira",
                       JIRA_EMAIL="ci@example.invalid", JIRA_API_TOKEN="synthetic-unused-token",
-                      JIRA_PROJECT_KEY="UNUSED")
+                      JIRA_PROJECT_KEY="UNUSED", GITHUB_SYNC_TOKEN="ambient-synthetic-token-must-not-be-used")
     try:
         run("start")
         run("status")
@@ -59,6 +59,12 @@ def main() -> None:
         assert session.get_nonstandard_attr("SameSite").lower() == "strict"
         assert not session.secure, "The disposable loopback HTTP demo needs non-Secure cookies"
         assert request("/api/auth/me")[1]["user"]["role"] == "admin"
+        status, sync = request("/api/github-sync")
+        assert status == 200 and sync["configured"] is False and sync["count"] == 0
+        assert not (LOCAL / "github-token").exists()
+        subprocess.run([str(ROOT / ".venv/bin/python"), "-m", "app.github_sync.worker", "--health"],
+                       cwd=ROOT / "backend", check=True, capture_output=True,
+                       env={**os.environ, "DATABASE_URL": f"sqlite:///{LOCAL / 'secops.db'}", "GITHUB_SYNC_TOKEN": ""})
         for name in ("API_KEY", "INGEST_API_KEY", "DASHBOARD_PASSWORD"):
             output = run("credentials", capture=True).stdout
             assert auth[name] not in output, "Credentials must not be printed into captured logs"

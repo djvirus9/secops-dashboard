@@ -103,6 +103,7 @@ class LocalHelperTests(unittest.TestCase):
         ambient = {"DATABASE_URL": "postgresql://synthetic.invalid/db", "SLACK_WEBHOOK_URL": "https://synthetic.invalid/webhook",
                    "JIRA_BASE_URL": "https://synthetic.invalid", "JIRA_EMAIL": "test@example.invalid",
                    "JIRA_API_TOKEN": "synthetic", "JIRA_PROJECT_KEY": "DEMO",
+                   "GITHUB_SYNC_TOKEN": "ambient-token-that-must-never-be-used",
                    "NO_PROXY": "upper.example.invalid", "no_proxy": "lower.example.invalid"}
         with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
                 patch.object(local, "credentials", return_value=credentials), patch.dict(os.environ, ambient, clear=True):
@@ -114,6 +115,7 @@ class LocalHelperTests(unittest.TestCase):
                 self.assertTrue({original, "127.0.0.1", "localhost", "::1"}.issubset(environment[key].split(",")))
             self.assertEqual(os.environ["SLACK_WEBHOOK_URL"], ambient["SLACK_WEBHOOK_URL"])
             self.assertEqual(environment["SESSION_COOKIE_SECURE"], "false")
+            self.assertEqual(environment["GITHUB_SYNC_TOKEN"], "")
             self.assertEqual(environment["DASHBOARD_ORIGINS"], "http://127.0.0.1:5050,http://localhost:5050")
 
     def test_frontend_process_receives_no_backend_or_bootstrap_secrets(self):
@@ -122,8 +124,72 @@ class LocalHelperTests(unittest.TestCase):
                "INGEST_API_KEY": "synthetic-ingest", "DASHBOARD_PASSWORD": "synthetic-bootstrap",
                "DASHBOARD_USERNAME": "admin", "DATABASE_URL": "sqlite:///private.db",
                "PGPASSWORD": "synthetic-postgres", "JIRA_API_TOKEN": "synthetic-jira"}
+        env["GITHUB_SYNC_TOKEN"] = "synthetic-github"
         child = local.frontend_environment(env)
         self.assertEqual(child, {name: env[name] for name in ("PATH", "BACKEND_URL", "DASHBOARD_ORIGINS")})
+
+    def test_github_token_requires_hidden_terminal_input_and_stays_private(self):
+        token = "github-synthetic-token-" + "x" * 32
+        with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
+                patch.object(local.sys.stdin, "isatty", return_value=False), patch.object(local.getpass, "getpass") as prompt:
+            with self.assertRaisesRegex(RuntimeError, "interactive terminal"):
+                local.github_token()
+            prompt.assert_not_called()
+            self.assertEqual(list(Path(directory).iterdir()), [])
+        with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
+                patch.object(local.sys.stdin, "isatty", return_value=True), \
+                redirect_stdout(StringIO()) as output, \
+                patch.object(local.sys.stdout, "isatty", return_value=True), \
+                patch.object(local.getpass, "getpass", return_value=token):
+            local.github_token()
+            path = Path(directory) / "github-token"
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(local.read_github_token(), token)
+            self.assertNotIn(token, output.getvalue())
+            local.github_token(clear=True)
+            self.assertFalse(path.exists())
+            self.assertEqual(local.read_github_token(), "")
+
+    def test_github_token_rejects_unsafe_files_and_invalid_input_without_printing_it(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)):
+            path = Path(directory) / "github-token"
+            path.write_text("github-synthetic-token-" + "x" * 32)
+            path.chmod(0o644)
+            with self.assertRaisesRegex(RuntimeError, "mode 0600"):
+                local.read_github_token()
+            path.unlink()
+            target = Path(directory) / "other"
+            target.write_text("github-synthetic-token-" + "x" * 32)
+            target.chmod(0o600)
+            path.symlink_to(target)
+            with self.assertRaises(OSError):
+                local.read_github_token()
+        for token in ("too-short", "a" * 513, "a" * 40 + "\n", "a" * 40 + "\x00", "a" * 40 + "é"):
+            with self.subTest(length=len(token)), self.assertRaises(RuntimeError) as error:
+                local.validate_github_token(token)
+            self.assertNotIn(token, str(error.exception))
+
+    def test_only_backend_and_github_worker_receive_explicit_local_github_token(self):
+        token = "github-synthetic-token-" + "x" * 32
+        with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
+                patch.dict(os.environ, {"GITHUB_SYNC_TOKEN": "ambient-ignored"}, clear=True):
+            path = Path(directory) / "github-token"
+            path.write_text(token)
+            path.chmod(0o600)
+            env = local.environment(5050, 8000)
+            for name in ("backend", "github-worker"):
+                self.assertEqual(local.service_environment(name, env)["GITHUB_SYNC_TOKEN"], token)
+            for name in ("frontend", "worker", "migration"):
+                self.assertNotIn("GITHUB_SYNC_TOKEN", local.service_environment(name, env))
+
+    def test_github_token_refuses_getpass_echo_fallback(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
+                patch.object(local.sys.stdin, "isatty", return_value=True), \
+                patch.object(local.sys.stdout, "isatty", return_value=True), \
+                patch.object(local.getpass, "getpass", side_effect=local.getpass.GetPassWarning):
+            with self.assertRaisesRegex(RuntimeError, "cannot disable echo"):
+                local.github_token()
+            self.assertFalse((Path(directory) / "github-token").exists())
 
     def test_seed_uses_private_backend_key_without_bootstrap_login(self):
         backend, requests = self.http_server("backend", lambda path, body: {"imported": 8} if body else {"count": 0})
@@ -204,10 +270,10 @@ class LocalHelperTests(unittest.TestCase):
                         patch.object(local.shutil, "which", return_value="/synthetic-node"), patch.object(local.shutil, "copytree"), \
                         patch.object(local.subprocess, "check_output", side_effect=["v24.0.0", json.dumps(runtime)]), \
                         patch.object(local.subprocess, "run", side_effect=run) as calls, redirect_stdout(StringIO()):
-                    local.prepare({**credentials, "DATABASE_URL": "sqlite:///synthetic.db", "PGPASSWORD": "synthetic"})
+                    local.prepare({**credentials, "DATABASE_URL": "sqlite:///synthetic.db", "PGPASSWORD": "synthetic", "GITHUB_SYNC_TOKEN": "private-github"})
                 installs = [call for call in calls.call_args_list if call.args[0][1:4] == ["-m", "pip", "install"]]
                 self.assertEqual(len(installs), 1)
-                for key in (*credentials, "DATABASE_URL", "PGPASSWORD"):
+                for key in (*credentials, "DATABASE_URL", "PGPASSWORD", "GITHUB_SYNC_TOKEN"):
                     self.assertNotIn(key, installs[0].kwargs["env"])
 
 

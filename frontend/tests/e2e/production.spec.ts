@@ -135,7 +135,7 @@ test('imports include project identity and disable unavailable parsers', async (
 
 test('mobile navigation and forms fit the viewport and retain accessible names', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const path of ['/', '/integrations', '/risks', `/findings/${findingId}`]) {
+  for (const path of ['/', '/integrations', '/risks', '/scanner-tokens', '/github-sync', `/findings/${findingId}`]) {
     await page.goto(path);
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

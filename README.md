@@ -2,15 +2,15 @@
 
 A self-hosted dashboard for importing, normalizing, deduplicating, and triaging
 security findings. FastAPI and PostgreSQL provide the API and persistence;
-Next.js provides the dashboard. A separate worker delivers durable Slack and
-Jira notification jobs.
+Next.js provides the dashboard. Dedicated workers deliver durable Slack/Jira
+notifications and optionally synchronize GitHub Cloud security alerts.
 
 The source is public on GitHub under the [MIT License](LICENSE). Run your own
 instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
-See the [0.2.0 release notes](CHANGELOG.md) for team workflows, runtime compatibility,
+See the [0.3.0 release notes](CHANGELOG.md) for GitHub sync, scoped scanner tokens,
 and upgrade notes.
 
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
@@ -48,6 +48,12 @@ builds. Local settings, logs, and process state live in the Git-ignored `.local/
 directory; `.local/secops.db` stores your findings and `.local/env.json` stores
 generated credentials with owner-only permissions. The helper disables external
 Slack/Jira integrations and uses its own settings instead of a production `.env`.
+GitHub synchronization is idle unless you explicitly configure its private token;
+ambient shell tokens are ignored. To connect repositories, use
+`python3 scripts/local.py github-token` in an interactive terminal, stop/start the
+helper, and open the administrator's GitHub Sync page. Hidden input is stored in
+`.local/github-token` with mode `0600`. `github-token --clear` removes it; restart
+again to apply removal. See [GitHub setup and limits](docs/github-sync.md).
 
 ```bash
 python3 scripts/local.py status
@@ -68,19 +74,22 @@ continue with Docker Compose below.
 ## Supported deployment
 
 This release is intended for **one trusted security team** on a single deployment.
-Version 0.2 provides individual local accounts, administrator/analyst/viewer roles,
+The application provides individual local accounts, administrator/analyst/viewer roles,
 and server-enforced project grants. Administrators can access every project and
 manage accounts; analysts can modify allowed projects; viewers can read them.
-An explicit empty grant list allows no projects. SSO, MFA, GitHub synchronization,
+An explicit empty grant list allows no projects. SSO, MFA,
 and isolation between separate organizations are future work. Use a private
 network or access gateway and HTTPS for every non-local deployment.
 
 The backend authenticates browser sessions with an HttpOnly, SameSite=Strict
 cookie. The frontend forwards that cookie and receives no administrative API key
 or bootstrap password. `API_KEY` remains an unrestricted administrative automation
-credential. Scanners use a separate `INGEST_API_KEY` accepted only by
-`POST /ingest/signal` and `POST /import/scan`; that shared key can ingest into any
-project. Keep both keys out of browsers and untrusted scanner jobs.
+credential. Administrators can issue expiring, revocable scanner tokens restricted
+to one exact project on the Scanner Tokens page. Tokens are shown only at creation
+or rotation, stored as hashes, and accepted only by `POST /ingest/signal` and
+`POST /import/scan`. Use them for scanner jobs. The legacy `INGEST_API_KEY` still
+ingests into any project for compatibility; keep it and `API_KEY` limited to
+trusted automation. See [scanner-token operations](docs/operations.md#scanner-tokens).
 
 Mutating browser requests must match an exact canonical origin in
 `DASHBOARD_ORIGINS`; request `Host` and forwarding headers do not establish trust.
@@ -108,7 +117,9 @@ See the [threat model](docs/threat-model.md) for trust boundaries and residual r
 
 Requirements: Docker with Compose v2. For a public deployment, first follow the
 [production runbook](docs/operations.md), including HTTPS and backup setup.
-The images use Python 3.14 and default to Node.js 24 LTS. Set
+Release images target Linux amd64 and arm64 and use Python 3.14 and Node.js 24 LTS.
+Use the digest references from the [GitHub release](https://github.com/djvirus9/secops-dashboard/releases)
+with the image deployment below. Source builds remain available. Set
 `FRONTEND_NODE_MAJOR=26` in `.env` to build the frontend image with Node 26.
 Node 26 is Current as of the 0.1.0 release; see the
 [Node.js release announcement](https://nodejs.org/en/blog/release/v26.0.0).
@@ -134,20 +145,30 @@ is strict loopback HTTP. Session defaults are 12 hours absolute and 30 minutes
 idle; an idle timeout cannot exceed the absolute lifetime.
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml config --quiet
-docker compose --env-file .env -f infra/docker-compose.yml up --build -d
-docker compose --env-file .env -f infra/docker-compose.yml ps
+# Copy BACKEND_IMAGE and FRONTEND_IMAGE from the release's release-images.env
+# into .env. Both values should be ghcr.io/...@sha256:... references.
+docker compose --env-file .env -f infra/docker-compose.images.yml config --quiet
+docker compose --env-file .env -f infra/docker-compose.images.yml up --no-build --wait
+docker compose --env-file .env -f infra/docker-compose.images.yml ps
 ```
+
+The image deployment has no build configuration and pulls the pinned release.
+For a source checkout or an optional Node 26 build, use
+`docker compose --env-file .env -f infra/docker-compose.yml up --build -d`.
+Both modes share runtime settings and the existing PostgreSQL volume when run
+under the same Compose project name. See [release image verification](docs/releasing.md)
+and the runbook before switching an existing deployment.
 
 Open <http://localhost:5000/login> and enter the initial administrator credentials.
 All published ports bind to loopback by default. The host-side TLS reverse proxy
 is the public entrypoint. Backend startup validates configuration and applies
-migrations; the frontend and worker wait for database readiness.
+migrations; the frontend and both workers wait for backend readiness. The GitHub
+worker remains healthy and idle when `GITHUB_SYNC_TOKEN` is unset.
 
 `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` bootstrap the first administrator
 only when the database contains no accounts. They never reset existing passwords
 on upgrade or restart. API-only installations can omit both values; supplying
-only one is rejected. See the runbook for account recovery and upgrades from 0.1.
+only one is rejected. See the runbook for account recovery and upgrades.
 
 **Upgrading an existing installation:** take and verify a backup first. Older
 databases created with `create_all` need the explicit legacy adoption procedure

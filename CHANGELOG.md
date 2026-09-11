@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0
+
+- Synchronize GitHub Cloud code-scanning and Dependabot alerts into an explicit
+  repository/project mapping. Add administrator-managed schedules, manual queueing,
+  pause/resume and run history. A separate worker handles bounded requests and
+  records upstream alert state without inferring resolution from missing results.
+- Issue, list, expire, rotate and revoke per-project scanner tokens. Persist only
+  token hashes and record a stable scanner identity; preserve legacy ingestion-key
+  compatibility for trusted automation.
+- Add prebuilt Linux amd64/arm64 backend/frontend image publication with SBOM,
+  provenance and digest-based Compose deployment. Release version tags are assigned
+  only after the staged digests pass native startup, authentication, ingestion and
+  backup/restore smoke tests on both architectures.
+- Extend the local helper with an idle GitHub worker and optional hidden token
+  input in an owner-only file. Backend/GitHub worker receive that credential;
+  frontend, notification worker and dependency builds do not.
+- Preserve existing accounts, changed passwords, sessions, saved views and findings
+  through additive migrations. Back up and rehearse upgrades before changing a
+  running deployment; image-mode backup/recovery uses an explicit Compose file.
+
+GitHub Cloud only: code-scanning alerts are read from the default branch and
+Dependabot alerts across states. GitHub secret-scanning, Enterprise Server,
+GitHub App installation/authentication, SSO, MFA and organization tenancy are not
+part of this release. Supported deployments still serve one trusted security team.
+
 ## 0.2.0 — 2026-09-11
 
 - Replace shared browser Basic authentication with individual local accounts,

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { verifyAutomation } from './automation-flow';
 
 const fixtures = Array.from({ length: 121 }, (_, index) => ({
   title: `Browser finding ${String(index + 1).padStart(3, '0')}`,
@@ -109,6 +110,10 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
       await expect(client.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–50 of 121');
       await expect(client.getByLabel('Saved view', { exact: true }).locator('option')).toHaveText(['Choose a view']);
       await expect(client.getByRole('navigation').getByRole('link', { name: 'Users', exact: true })).toHaveCount(0);
+      for (const [path, label] of [['/scanner-tokens', 'Scanner tokens'], ['/github-sync', 'GitHub sync']]) {
+        await expect(client.getByRole('navigation').getByRole('link', { name: label, exact: true })).toHaveCount(0);
+        expect((await client.request.get(`/api${path}`)).status()).toBe(403);
+      }
       expect((await client.request.get(`/api/findings/${hiddenId}`)).status()).toBe(404);
       expect((await client.request.patch(`/api/saved-views/${adminView.id}`, { headers: { Origin: origin }, data: { name: 'Attempted overwrite' } })).status()).toBe(404);
     }
@@ -154,9 +159,12 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
     await expect(viewer.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     expect((await viewer.request.get('/api/auth/me')).status()).toBe(401);
     await analyst.getByRole('button', { name: 'Sign out' }).click();
+    await expect(analyst.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
     expect((await analyst.request.get('/api/auth/me')).status()).toBe(401);
   } finally { await viewerContext.close(); await analystContext.close(); }
+  await verifyAutomation(page);
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   expect((await request.get('/api/auth/me')).status()).toBe(401);
 
 });

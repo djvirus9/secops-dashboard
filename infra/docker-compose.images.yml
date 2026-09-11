@@ -1,0 +1,37 @@
+# This deployment never builds locally. Pin both image references to release digests.
+services:
+  postgres:
+    extends:
+      file: compose.services.yml
+      service: postgres
+
+  backend:
+    extends:
+      file: compose.services.yml
+      service: backend
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to a release image digest}
+    pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
+
+  notification-worker:
+    extends:
+      file: compose.services.yml
+      service: notification-worker
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to a release image digest}
+    pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
+
+  github-worker:
+    extends:
+      file: compose.services.yml
+      service: github-worker
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to a release image digest}
+    pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
+
+  frontend:
+    extends:
+      file: compose.services.yml
+      service: frontend
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE must be set to a release image digest}
+    pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
+
+volumes:
+  pgdata:
