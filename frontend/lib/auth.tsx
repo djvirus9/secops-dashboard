@@ -31,6 +31,8 @@ export function safeReturnRoute(value: unknown): UrlObject {
     case "/users": return { pathname: "/users", query, hash };
     case "/scanner-tokens": return { pathname: "/scanner-tokens", query, hash };
     case "/github-sync": return { pathname: "/github-sync", query, hash };
+    case "/ai-security": return { pathname: "/ai-security", query, hash };
+    case "/remediation": return { pathname: "/remediation", query, hash };
   }
   const detail = /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(pathname);
   return detail ? { pathname: "/findings/[id]", query: { ...query, id: detail[1] }, hash } : { pathname: "/" };

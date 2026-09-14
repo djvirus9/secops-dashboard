@@ -1,4 +1,5 @@
 """One filtering contract for finding lists, saved views, and CSV downloads."""
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -8,7 +9,8 @@ from .models import Finding
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
 FindingStatus = Literal["open", "investigating", "resolved", "closed"]
-FindingSort = Literal["risk_desc", "last_seen_desc"]
+FindingSort = Literal["priority_desc", "risk_desc", "last_seen_desc"]
+SlaFilter = Literal["overdue", "due_soon", "accepted", "on_track"]
 
 
 class FindingFilters(BaseModel):
@@ -20,9 +22,11 @@ class FindingFilters(BaseModel):
     assignee: str | None = Field(None, max_length=255)
     tool: str | None = Field(None, max_length=100)
     project: str | None = Field(None, max_length=255)
+    kev: bool | None = None
+    sla: SlaFilter | None = None
     sort: FindingSort = "last_seen_desc"
 
-    @field_validator("severity", "status", mode="before")
+    @field_validator("severity", "status", "kev", "sla", mode="before")
     @classmethod
     def empty_choice(cls, value):
         return None if value == "" else value
@@ -51,11 +55,31 @@ def finding_filters(query: FindingFilters) -> list:
             filters.append(column == value)
     if query.assignee is not None:
         filters.append(Finding.assignee.is_(None) if query.assignee == "" else Finding.assignee == query.assignee)
+    if query.kev is not None:
+        filters.append(Finding.kev.is_(query.kev))
+    if query.sla is not None:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        active = Finding.status.in_(["open", "investigating"])
+        accepted = Finding.risk_accepted_until > now
+        if query.sla == "accepted":
+            filters.extend([active, accepted])
+        elif query.sla == "overdue":
+            filters.extend([active, Finding.remediation_due_at < now,
+                            or_(Finding.risk_accepted_until.is_(None), Finding.risk_accepted_until <= now)])
+        elif query.sla == "due_soon":
+            filters.extend([active, Finding.remediation_due_at >= now,
+                            Finding.remediation_due_at <= now + timedelta(days=7),
+                            or_(Finding.risk_accepted_until.is_(None), Finding.risk_accepted_until <= now)])
+        else:
+            filters.extend([active, Finding.remediation_due_at > now + timedelta(days=7),
+                            or_(Finding.risk_accepted_until.is_(None), Finding.risk_accepted_until <= now)])
     return filters
 
 
 def finding_order(sort: FindingSort) -> list:
     order = [Finding.last_seen.desc(), Finding.id]
-    if sort == "risk_desc":
+    if sort == "priority_desc":
+        order.insert(0, Finding.priority_score.desc())
+    elif sort == "risk_desc":
         order.insert(0, Finding.risk_score.desc())
     return order

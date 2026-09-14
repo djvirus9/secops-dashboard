@@ -20,7 +20,8 @@ elif "SELECT (SELECT count(*) FROM findings)" in command:
     print("1:1")
 elif "SELECT count(*) FROM public." in command:
     table = re.search(r"SELECT count\(\*\) FROM public\.([a-z_]+)", command).group(1)
-    print(0 if table in {"github_sync_runs", "github_alerts"} else 1)
+    print(2 if table == "intelligence_sync_states" else
+          0 if table in {"github_sync_runs", "github_alerts", "vulnerability_intelligence"} else 1)
 '''
 
 
@@ -51,7 +52,10 @@ class BackupRestoreTests(unittest.TestCase):
         self.assertEqual(self.archive.stat().st_mode & 0o777, 0o600)
         result = self.run_script("verify-restore.sh", SECOPS_EXPECTED_FINDINGS="1", SECOPS_EXPECTED_COMMENTS="1",
                                  SECOPS_EXPECTED_SCANNER_TOKENS="1", SECOPS_EXPECTED_GITHUB_CONNECTIONS="1",
-                                 SECOPS_EXPECTED_GITHUB_SYNC_RUNS="0", SECOPS_EXPECTED_GITHUB_ALERTS="0")
+                                 SECOPS_EXPECTED_GITHUB_SYNC_RUNS="0", SECOPS_EXPECTED_GITHUB_ALERTS="0",
+                                 SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE="0",
+                                 SECOPS_EXPECTED_REMEDIATION_POLICIES="1",
+                                 SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES="2")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.run_script("backup.sh").returncode, 1)
         for call in self.calls():

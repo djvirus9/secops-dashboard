@@ -12,16 +12,27 @@ from test_migrations import migration_engine, upgrade, downgrade
 
 def test_github_migration_preserves_existing_findings_users_and_scanner_credentials(migration_engine):
     upgrade(migration_engine, "0005")
-    with Session(migration_engine) as db:
-        db.add_all([
-            User(username="synthetic-admin", password_hash="unchanged-password-hash", role="admin"),
-            ScannerToken(name="Existing scanner", project="one", token_hash="b" * 64,
-                         expires_at=_utcnow() + timedelta(days=1)),
-            Finding(fingerprint="a" * 64, tool="synthetic", project="one", title="Preserved triage",
-                    severity="high", asset="synthetic.invalid", status="investigating", assignee="alice",
-                    signal_id="synthetic-signal", occurrences=8),
-        ])
-        db.commit()
+    old = sa.MetaData()
+    old.reflect(migration_engine)
+    now = _utcnow()
+    with migration_engine.begin() as connection:
+        connection.execute(old.tables["users"].insert(), {
+            "id": "user-preserved", "username": "synthetic-admin",
+            "password_hash": "unchanged-password-hash", "role": "admin", "active": True,
+            "created_at": now, "updated_at": now,
+        })
+        connection.execute(old.tables["scanner_tokens"].insert(), {
+            "id": "scanner-preserved", "name": "Existing scanner", "project": "one",
+            "token_hash": "b" * 64, "created_at": now, "expires_at": now + timedelta(days=1),
+        })
+        connection.execute(old.tables["findings"].insert(), {
+            "id": "finding-preserved", "fingerprint": "a" * 64, "tool": "synthetic",
+            "project": "one", "title": "Preserved triage", "severity": "high",
+            "asset": "synthetic.invalid", "exposure": "internal", "criticality": "medium",
+            "status": "investigating", "assignee": "alice", "risk_score": 1,
+            "occurrences": 8, "references_json": "[]", "tags_json": "[]",
+            "first_seen": now, "last_seen": now, "signal_id": "synthetic-signal",
+        })
     metadata = sa.MetaData()
     metadata.reflect(migration_engine)
     tables = [table for table in metadata.sorted_tables if table.name != "alembic_version"]
@@ -51,4 +62,4 @@ def test_github_identity_is_unique_and_populated_downgrade_refuses_before_ddl(mi
         downgrade(migration_engine, "0005")
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007"

@@ -14,7 +14,7 @@ def config(filename):
 def main():
     source = config("infra/docker-compose.yml")
     images = config("infra/docker-compose.images.yml")
-    expected = {"postgres", "backend", "notification-worker", "github-worker", "frontend"}
+    expected = {"postgres", "backend", "notification-worker", "github-worker", "intelligence-worker", "frontend"}
     assert set(source["services"]) == set(images["services"]) == expected
     for name in expected:
         original = source["services"][name]
@@ -26,6 +26,12 @@ def main():
         assert normalized(original) == normalized(prebuilt), "Runtime settings drifted between Compose modes"
         env = prebuilt.get("environment", {})
         assert ("GITHUB_SYNC_TOKEN" in env) == (name in {"backend", "github-worker"}), "GitHub token reached an unrelated service"
+        if name not in {"backend", "postgres"}:
+            assert not {"API_KEY", "INGEST_API_KEY", "DASHBOARD_PASSWORD"} & set(env), \
+                "Administrative or browser credentials reached a worker"
+        if name == "intelligence-worker":
+            assert set(env) == {"PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "INTELLIGENCE_POLL_SECONDS"}, \
+                "Intelligence worker received unrelated application or integration credentials"
         if name == "frontend":
             assert set(env) == {"BACKEND_URL", "DASHBOARD_ORIGINS"}, "Frontend runtime must not receive backend credentials"
     print("Source/image Compose parity, build isolation and service credential boundaries passed")

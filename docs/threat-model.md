@@ -1,4 +1,4 @@
-# Threat model: version 0.3
+# Threat model: version 0.4
 
 This model describes the repository's self-hosted architecture and its automated
 checks. It does not attest to a particular running server, cloud account, or
@@ -10,6 +10,7 @@ organization tenancy, and high availability are outside this release.
 
 Protected assets include findings and scanner evidence, project membership,
 password hashes and sessions, saved views, audit history, API/integration secrets,
+remediation policies, deadlines, risk acceptances, cached vulnerability intelligence,
 database backups, and service availability. Treat imported scanner text as
 untrusted even when the scanner has a valid ingestion key.
 
@@ -22,6 +23,7 @@ untrusted even when the scanner has a valid ingestion key.
 | Administrative automation | Full API authority across projects using `API_KEY`; fixed `api-admin` audit identity |
 | Scanner job | One-project ingestion with a revocable scanner token; legacy `INGEST_API_KEY` remains global for ingestion; neither allows reads or account administration |
 | GitHub sync administrator / worker | Administrator selects repository/project mappings; trusted worker reads fixed GitHub Cloud alert endpoints with one server token |
+| Intelligence administrator / worker | Administrator controls opt-in schedules; trusted worker reads fixed public CISA/FIRST endpoints without a feed credential |
 | Host/database operator | Controls deployments, backups, and interactive account recovery; outside application ACL isolation |
 
 ```mermaid
@@ -35,19 +37,25 @@ flowchart LR
     worker -->|Integration credentials| external[Slack / Jira]
     github[GitHub sync worker] --> db
     github -->|Server token; fixed HTTPS endpoints| cloud[api.github.com: alert data]
+    intel[Intelligence worker] --> db
+    intel -->|Fixed HTTPS; CVE IDs only for EPSS| feeds[CISA KEV / FIRST EPSS]
     release[Tested main / publication workflow] -->|Attested image digests| host[Host deployment]
     operator[Host operator] -->|Backup, restore, recovery| db
 ```
 
 The browser/frontend boundary carries user sessions, never a frontend-injected
 administrative key. The backend checks roles and project grants independently
-of submitted filters and proxy headers. The database and worker are trusted
+of submitted filters and proxy headers. The database and workers are trusted
 components; PostgreSQL, backend, and frontend ports bind to loopback in the
 documented host-proxy setup. The local helper substitutes isolated SQLite and
 strict loopback HTTP, disables Slack/Jira, and keeps its secrets outside Git.
 GitHub sync is opt-in through an owner-only token file. Only backend and GitHub
 worker receive that token. Repository/project mappings store no credential and
 cannot select a different API host. GitHub alert content is untrusted scanner data.
+Public vulnerability intelligence is also opt-in. Its worker has no external credential,
+ignores ambient proxy configuration, rejects redirects and oversized or malformed
+documents, and preserves last-good data on failure. EPSS requests disclose only
+validated CVE identifiers already present in findings.
 
 ## Prioritized abuse cases
 
@@ -63,6 +71,8 @@ of application audit history and infrastructure logs.
 | 1. Steal automation/integration secrets or sensitive evidence from logs, exports, backups, or public Git | Medium / high / often difficult to detect | Private local files, no secrets in CLI arguments/captured output, normalized secret redaction, raw payload storage disabled, no raw/description CSV fields; test proxy bypass, frontend env separation and secret-evidence handling; operator owns storage encryption and retention |
 | 1. Use a stolen scanner token to affect another project or retain access after rotation | Medium / high / stable scanner identity and last-use inventory aid review | Single exact-project ingestion scope, hash-only persistence, expiry/revocation/rotation and admin-only management; test forbidden reads, cross-project payloads, revoked/expired/rotated credentials and concurrent changes |
 | 1. Exfiltrate the GitHub token through a configured destination or malicious pagination/redirect | Low–medium / high / upstream failures visible, host compromise may not be | Fixed api.github.com endpoint construction, validated owner/repo identifiers, no arbitrary hosts, disabled redirect following, bounded pagination and sanitized failures; mocked hostile URL/redirect responses, local token permissions and environment-isolation tests |
+| 1. Poison priority or disclose internal data through a public intelligence refresh | Low–medium / high / stale and failed state is visible; plausible poisoned values may not be | Fixed CISA/FIRST hosts, no arbitrary URL, no proxy environment, redirect/size/schema/range validation, CVE-only EPSS requests, last-good retention, and transparent score reasons; test hostile documents, redirects, missing records, failures, and recalculation |
+| 1. Hide overdue work through unauthorized or indefinite risk acceptance | Medium / high / audit and finding history aid review | Administrator user session only, project-scoped lookup, required reason, maximum 365-day expiry, automatic expiry, no priority reduction, and durable audit/history entries; test API-key/role rejection, expiry bounds, revoke, and SLA restoration |
 | 2. Duplicate alerts, overwrite another project's identity, or infer a false resolution after a partial sync | Medium / high / run history and source-state evidence aid review | Immutable repository/project/source mappings, stable source alert identity, transactional claims and cancellation, unchanged-replay deduplication, no resolution inferred from absence; test replay, source changes, interruption, pagination failure and competing workers |
 | 2. Deploy an untested or replaced image through a moving tag | Medium / high / attestations and digest inspection support detection | Exact tested-main gate, native smoke on both staged architectures, publish-once version tags, SBOM/provenance and deployed digest references; unit-test failed/missing CI, stale HEAD and tag replacement; operators verify package visibility/provenance and retain verified backups |
 | 2. Exhaust resources with login attempts, giant reports, repeated exports, or many saved views | Medium / medium–high / request failures and resource use are observable | Global/account login throttles, request/parser/import limits, import deadline, 100 saved views per user, 200 bulk IDs, 10,000-row/16-MiB CSV caps; test boundaries and rejected transactions; operator owns upstream rate limits and capacity monitoring |
@@ -82,6 +92,13 @@ of application audit history and infrastructure logs.
   Use least-privilege repository access and rotate the server credential. There
   is no per-user GitHub OAuth identity or GitHub App installation boundary.
   A worker heartbeat does not establish alert freshness or upstream permissions.
+- CISA and FIRST availability, accuracy, and continuity are external dependencies.
+  A feed can be compromised while remaining schema-valid, and EPSS requests reveal
+  which public CVE identifiers exist locally. Review source freshness and score
+  reasons; do not treat enrichment as proof of exploitability or remediation.
+- Administrators can create policy changes and risk acceptances across the trusted
+  deployment. Audit records are not tamper-proof against a database/host operator,
+  and the application does not provide an independent approval chain.
 - A stolen live user session can act until it expires or is revoked. HttpOnly
   limits token reads by JavaScript; it does not make same-origin script compromise
   harmless. MFA and federated identity are not present.

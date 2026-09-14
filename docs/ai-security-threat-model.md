@@ -45,7 +45,8 @@ provider, execute a tool, change a finding, or send data over the network.
 - An authenticated analyst can request summaries and remediation drafts.
 - An attacker may control text imported from a scanner, ticket, repository, or runbook.
 - A future model provider may return an incorrect or adversarial candidate plan.
-- The existing dashboard proxy and API-key boundary remain in place.
+- The existing session-authenticated frontend proxy and backend role/project
+  authorization boundaries remain in place; automation keys never reach the browser.
 - The lab uses synthetic tenants, findings, recipients, and secrets only.
 - The model is not an authorization authority and the system prompt is not a secret store.
 

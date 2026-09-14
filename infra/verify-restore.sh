@@ -9,7 +9,9 @@ fi
 for secops_expected in "${SECOPS_EXPECTED_FINDINGS:-}" "${SECOPS_EXPECTED_COMMENTS:-}" \
     "${SECOPS_EXPECTED_USERS:-}" "${SECOPS_EXPECTED_SESSIONS:-}" "${SECOPS_EXPECTED_SAVED_VIEWS:-}" \
     "${SECOPS_EXPECTED_SCANNER_TOKENS:-}" "${SECOPS_EXPECTED_GITHUB_CONNECTIONS:-}" \
-    "${SECOPS_EXPECTED_GITHUB_SYNC_RUNS:-}" "${SECOPS_EXPECTED_GITHUB_ALERTS:-}"; do
+    "${SECOPS_EXPECTED_GITHUB_SYNC_RUNS:-}" "${SECOPS_EXPECTED_GITHUB_ALERTS:-}" \
+    "${SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE:-}" "${SECOPS_EXPECTED_REMEDIATION_POLICIES:-}" \
+    "${SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES:-}"; do
     if [[ -n "$secops_expected" && ! "$secops_expected" =~ ^[0-9]+$ ]]; then
         echo "Expected restore row counts must be nonnegative integers" >&2
         exit 1
@@ -49,9 +51,9 @@ if [[ -n "${SECOPS_EXPECTED_FINDINGS:-}" && "$secops_findings" != "$SECOPS_EXPEC
     exit 1
 fi
 echo "Restored findings: $secops_findings; comments: $secops_comments"
-# Identity/integration tables were introduced in 0.2/0.3. Older archives may omit them;
+# Identity/integration/intelligence tables were introduced after 0.1. Older archives may omit them;
 # report zero without issuing a SELECT against an absent relation.
-for secops_table in users user_sessions saved_views scanner_tokens github_connections github_sync_runs github_alerts; do
+for secops_table in users user_sessions saved_views scanner_tokens github_connections github_sync_runs github_alerts vulnerability_intelligence remediation_policies intelligence_sync_states; do
     case "$secops_table" in
         users) secops_expected="${SECOPS_EXPECTED_USERS:-}" ;;
         user_sessions) secops_expected="${SECOPS_EXPECTED_SESSIONS:-}" ;;
@@ -60,6 +62,9 @@ for secops_table in users user_sessions saved_views scanner_tokens github_connec
         github_connections) secops_expected="${SECOPS_EXPECTED_GITHUB_CONNECTIONS:-}" ;;
         github_sync_runs) secops_expected="${SECOPS_EXPECTED_GITHUB_SYNC_RUNS:-}" ;;
         github_alerts) secops_expected="${SECOPS_EXPECTED_GITHUB_ALERTS:-}" ;;
+        vulnerability_intelligence) secops_expected="${SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE:-}" ;;
+        remediation_policies) secops_expected="${SECOPS_EXPECTED_REMEDIATION_POLICIES:-}" ;;
+        intelligence_sync_states) secops_expected="${SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES:-}" ;;
     esac
     secops_exists="$("${secops_compose[@]}" exec -T postgres sh -c \
         'exec psql -U "$POSTGRES_USER" --dbname="$1" --no-psqlrc --set=ON_ERROR_STOP=1 --tuples-only --no-align --command="$2"' \

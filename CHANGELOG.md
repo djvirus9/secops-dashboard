@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 — 2026-09-15
+
+- Add opt-in CISA Known Exploited Vulnerabilities and FIRST EPSS enrichment
+  through a dedicated durable worker. Fixed source URLs, bounded responses,
+  redirect rejection, schema validation, sanitized failures, and last-good data
+  retention keep public feed content outside the trust boundary.
+- Add a transparent 0–100 remediation priority separate from technical risk.
+  Every score exposes its severity, internet exposure, asset criticality, KEV,
+  and high-EPSS contributions on finding list and detail views.
+- Add default and per-project remediation SLA policies, deadlines, overdue/due-soon
+  filters, operational aggregates, aging buckets, priority distribution, top
+  assets, and 14-day activity trend to the command center.
+- Add administrator-only, reasoned risk acceptance with a required expiry of no
+  more than 365 days. Acceptances and revocations create finding history and
+  audit events and never reduce the underlying technical priority.
+- Ship the synthetic Secure AI Copilot lab and its reproducible ten-scenario
+  evaluation, threat model, and authenticated UI without provider calls or live
+  tool execution.
+- Add migration, upgrade, backup/restore, worker-health, API, frontend, and
+  Compose coverage for the new schema and service. Public intelligence remains
+  disabled until an administrator explicitly enables or queues it.
+
 ## 0.3.0
 
 - Synchronize GitHub Cloud code-scanning and Dependabot alerts into an explicit

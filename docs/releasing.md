@@ -2,7 +2,7 @@
 
 The image workflow publishes these Linux amd64/arm64 images:
 
-- `ghcr.io/djvirus9/secops-dashboard-backend` (backend and both worker services)
+- `ghcr.io/djvirus9/secops-dashboard-backend` (backend and all three worker services)
 - `ghcr.io/djvirus9/secops-dashboard-frontend` (Node 24 LTS)
 
 Use the digest references attached to a completed GitHub release, not a staging

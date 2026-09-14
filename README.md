@@ -3,15 +3,16 @@
 A self-hosted dashboard for importing, normalizing, deduplicating, and triaging
 security findings. FastAPI and PostgreSQL provide the API and persistence;
 Next.js provides the dashboard. Dedicated workers deliver durable Slack/Jira
-notifications and optionally synchronize GitHub Cloud security alerts.
+notifications, optionally synchronize GitHub Cloud security alerts, and refresh
+public CISA KEV and FIRST EPSS vulnerability intelligence.
 
 The source is public on GitHub under the [MIT License](LICENSE). Run your own
 instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
-See the [0.3.0 release notes](CHANGELOG.md) for GitHub sync, scoped scanner tokens,
-and upgrade notes.
+See the [0.4.0 release notes](CHANGELOG.md) for remediation intelligence,
+explainable priority, SLA workflows, and upgrade notes.
 
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
 
@@ -133,6 +134,23 @@ Read the [AI security threat model](docs/ai-security-threat-model.md) and
 [evaluation report](docs/ai-security-evaluation.md) before connecting any real
 model or tool.
 
+## Remediation intelligence
+
+The Remediation page turns scanner severity into an explainable operational
+priority. It combines severity, internet exposure, asset criticality, CISA's
+Known Exploited Vulnerabilities catalog, and FIRST EPSS percentile. Each finding
+shows the contributing points; no model makes or hides the decision.
+
+Default and project-specific SLA policies assign remediation deadlines. The
+command center shows urgent, known-exploited, overdue, aging, priority, asset,
+and 14-day trend views. Administrators can record a reasoned, expiring risk
+acceptance without lowering the technical priority or changing the finding.
+
+External refresh is opt-in. The dedicated worker uses only fixed public HTTPS
+endpoints, rejects redirects and malformed/oversized documents, and retains the
+last successful cache after a failure. See the
+[remediation intelligence guide](docs/remediation-intelligence.md).
+
 ## Run with Docker Compose
 
 Requirements: Docker with Compose v2. For a public deployment, first follow the
@@ -182,7 +200,7 @@ and the runbook before switching an existing deployment.
 Open <http://localhost:5000/login> and enter the initial administrator credentials.
 All published ports bind to loopback by default. The host-side TLS reverse proxy
 is the public entrypoint. Backend startup validates configuration and applies
-migrations; the frontend and both workers wait for backend readiness. The GitHub
+migrations; the frontend and all three workers wait for backend readiness. The GitHub
 worker remains healthy and idle when `GITHUB_SYNC_TOKEN` is unset.
 
 `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` bootstrap the first administrator
@@ -253,7 +271,8 @@ pip install -r backend/requirements-dev.txt
 In another shell export only `BACKEND_URL` and `DASHBOARD_ORIGINS`, then run
 `cd frontend && npm ci && npm run dev`. To exercise notifications, start
 `python -m app.notifications.worker` from `backend` with the same database and
-integration settings. The dashboard runs on port 5000 and the API on port 8000.
+integration settings. Start `python -m app.remediation.worker` to process queued
+KEV/EPSS refreshes. The dashboard runs on port 5000 and the API on port 8000.
 Local development can explicitly opt out of backend authentication with
 `ALLOW_INSECURE_NO_AUTH=true`; Compose always disables this escape hatch.
 
@@ -291,6 +310,10 @@ with dependency audits, CodeQL, production browser tests, and Docker builds.
 - Saved views: private to their owning user session.
 - `GET /ai-security/scenarios`, `GET /ai-security/evaluation`, and
   `POST /ai-security/run`: authenticated, synthetic AI control-plane lab.
+- `GET /intelligence/status`, `POST /intelligence/sync`, and source settings:
+  authenticated feed visibility with administrator-controlled refreshes.
+- Remediation policies are readable within project grants and administrator-managed;
+  risk acceptance is an expiring, audited administrator session action.
 - Account management, integration status/tests, notification review, and authenticated
   OpenAPI documentation: administrative access.
 - `MAX_IMPORT_REQUEST_BYTES`, `MAX_SCAN_BYTES`, and `MAX_FINDINGS_PER_IMPORT`

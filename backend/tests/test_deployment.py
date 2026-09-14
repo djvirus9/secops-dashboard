@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.db import get_database_url
-from app.deployment import validate_backend_settings, validate_session_settings
+from app.deployment import validate_backend_settings, validate_session_settings, validate_worker_settings
 
 
 @pytest.mark.parametrize("name,value", [
@@ -39,6 +39,24 @@ def test_database_password_remains_literal_with_structured_settings(monkeypatch)
     assert url.password == password
     assert url.host == "database.invalid"
     assert url.database == "secops"
+
+
+def test_intelligence_worker_does_not_require_unrelated_credentials(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("INGEST_API_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_SYNC_TOKEN", "invalid-but-unrelated")
+    validate_worker_settings("intelligence")
+    monkeypatch.setenv("INTELLIGENCE_POLL_SECONDS", "301")
+    with pytest.raises(ValueError, match="INTELLIGENCE_POLL_SECONDS"):
+        validate_worker_settings("intelligence")
+
+
+def test_github_worker_still_validates_its_own_token(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("GITHUB_SYNC_TOKEN", "too-short")
+    with pytest.raises(ValueError, match="GITHUB_SYNC_TOKEN"):
+        validate_worker_settings("github")
 
 
 def test_placeholder_database_password_is_rejected_without_exposure(monkeypatch):

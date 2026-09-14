@@ -1,4 +1,4 @@
-"""Run queued and scheduled GitHub alert imports in a separate process."""
+"""Run queued and scheduled public vulnerability-intelligence refreshes."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,8 @@ import time
 from ..limits import positive_int_setting
 from .service import process_one
 
-HEARTBEAT = Path("/tmp/secops-github-sync-heartbeat")
+
+HEARTBEAT = Path("/tmp/secops-intelligence-heartbeat")
 logger = logging.getLogger(__name__)
 
 
@@ -20,10 +21,10 @@ def main():
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if args.health:
-        max_age = max(180, positive_int_setting("GITHUB_SYNC_POLL_SECONDS", 5) * 3)
+        max_age = max(180, positive_int_setting("INTELLIGENCE_POLL_SECONDS", 5) * 3)
         raise SystemExit(0 if HEARTBEAT.exists() and time.time() - HEARTBEAT.stat().st_mtime < max_age else 1)
     from ..deployment import validate_worker_settings
-    validate_worker_settings("github")
+    validate_worker_settings("intelligence")
     logging.basicConfig(level=logging.INFO)
     stopping = False
 
@@ -38,12 +39,12 @@ def main():
             processed = process_one()
             HEARTBEAT.touch()
         except Exception:
-            logger.error("GitHub worker database operation failed")
+            logger.error("Intelligence worker database operation failed")
             processed = False
         if args.once:
             break
         if not processed:
-            for _ in range(positive_int_setting("GITHUB_SYNC_POLL_SECONDS", 5)):
+            for _ in range(positive_int_setting("INTELLIGENCE_POLL_SECONDS", 5)):
                 if stopping:
                     break
                 time.sleep(1)

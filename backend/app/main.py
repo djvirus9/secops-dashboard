@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 from typing import Annotated, Literal, Optional
 
@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from defusedxml.common import DefusedXmlException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -32,12 +32,17 @@ from .access import principal, project_filters, require_project, require_write, 
 from .accounts import bootstrap_admin, router as accounts_router
 from .db import SessionLocal
 from .limits import RequestBodyLimitMiddleware, positive_int_setting
-from .models import Asset, Comment, Finding, Signal, ImportRun, NotificationDelivery
+from .models import (
+    Asset, Comment, Finding, Signal, ImportRun, NotificationDelivery,
+    IntelligenceSyncState, RemediationPolicy, VulnerabilityIntelligence,
+)
 from .notifications.outbox import enqueue, enqueue_finding, serialize_delivery
 from .operations import router as operations_router
 from .workflows import router as workflows_router
 from .scanner_tokens import router as scanner_tokens_router
 from .github_sync.routes import router as github_sync_router
+from .remediation.routes import router as remediation_router
+from .remediation.service import backfill_remediation, refresh_finding
 from .finding_query import FindingFilters, finding_filters, finding_order
 from .parsers import get_parser, list_parsers, parse_scan_results
 from .parsers.base import ParsedFinding, ParserRegistry, ScannerCategory
@@ -54,15 +59,17 @@ async def lifespan(app: FastAPI):
     from .deployment import validate_backend_settings
     validate_backend_settings()
     bootstrap_admin()
+    backfill_remediation()
     yield
 
 
-app = FastAPI(title="SecOps Dashboard API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="SecOps Dashboard API", version="0.4.0", lifespan=lifespan)
 app.include_router(operations_router)
 app.include_router(accounts_router)
 app.include_router(workflows_router)
 app.include_router(scanner_tokens_router)
 app.include_router(github_sync_router)
+app.include_router(remediation_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -86,7 +93,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -192,6 +199,18 @@ def _json_list(value: Optional[str]) -> list:
 
 
 def _serialize_finding(f: Finding) -> dict:
+    now = utcnow()
+    acceptance_status = (
+        "active" if f.risk_accepted_until and f.risk_accepted_until > now
+        else "expired" if f.risk_accepted_at else "none"
+    )
+    sla_status = "complete" if f.status in {"resolved", "closed"} else (
+        "accepted" if acceptance_status == "active"
+        else "untracked" if f.remediation_due_at is None
+        else "overdue" if f.remediation_due_at < now
+        else "due_soon" if f.remediation_due_at <= now + timedelta(days=7)
+        else "on_track"
+    )
     return {
         "id": f.id,
         "fingerprint": f.fingerprint,
@@ -209,18 +228,37 @@ def _serialize_finding(f: Finding) -> dict:
         "status": f.status,
         "assignee": f.assignee,
         "risk_score": f.risk_score,
+        "priority_score": f.priority_score,
+        "priority_reasons": _json_list(f.priority_reasons_json),
         "occurrences": f.occurrences,
         "description": f.description,
         "recommendation": f.recommendation,
         "cwe_id": f.cwe_id,
         "cve_id": f.cve_id,
         "cvss_score": f.cvss_score,
+        "kev": f.kev,
+        "kev_date_added": f.kev_date_added.isoformat() if f.kev_date_added else None,
+        "kev_due_date": f.kev_due_date.isoformat() if f.kev_due_date else None,
+        "kev_ransomware": f.kev_ransomware,
+        "epss_score": f.epss_score,
+        "epss_percentile": f.epss_percentile,
+        "intelligence_updated_at": f.intelligence_updated_at.isoformat() + "Z" if f.intelligence_updated_at else None,
         "file_path": f.file_path,
         "line_number": f.line_number,
         "references": _json_list(f.references_json),
         "tags": _json_list(f.tags_json),
         "first_seen": f.first_seen.isoformat() + "Z",
         "last_seen": f.last_seen.isoformat() + "Z",
+        "remediation_due_at": f.remediation_due_at.isoformat() + "Z" if f.remediation_due_at else None,
+        "resolved_at": f.resolved_at.isoformat() + "Z" if f.resolved_at else None,
+        "sla_status": sla_status,
+        "risk_acceptance": {
+            "status": acceptance_status,
+            "accepted_at": f.risk_accepted_at.isoformat() + "Z" if f.risk_accepted_at else None,
+            "expires_at": f.risk_accepted_until.isoformat() + "Z" if f.risk_accepted_until else None,
+            "accepted_by": f.risk_accepted_by,
+            "reason": f.risk_acceptance_reason,
+        },
         "signal_id": f.signal_id,
     }
 
@@ -433,6 +471,9 @@ def ready():
         db.execute(select(Finding.project, Finding.component).limit(1))
         db.execute(select(ImportRun.id).limit(1))
         db.execute(select(NotificationDelivery.id).limit(1))
+        db.execute(select(IntelligenceSyncState.source).limit(1))
+        db.execute(select(RemediationPolicy.project).limit(1))
+        db.execute(select(VulnerabilityIntelligence.cve_id).limit(1))
         return {"status": "ready"}
     except Exception as exc:
         logger.error("Database readiness check failed (%s)", type(exc).__name__)
@@ -467,6 +508,76 @@ def dashboard_summary(request: Request):
             .group_by(Finding.severity)
         ).all()
 
+        now = utcnow()
+        active_scope = [*scope, Finding.status.in_(active_statuses)]
+        not_accepted = or_(Finding.risk_accepted_until.is_(None), Finding.risk_accepted_until <= now)
+        sums = db.execute(select(
+            func.sum(case((Finding.priority_score >= 80, 1), else_=0)).label("urgent"),
+            func.sum(case((Finding.kev.is_(True), 1), else_=0)).label("kev"),
+            func.sum(case((Finding.first_seen >= now - timedelta(days=7), 1), else_=0)).label("age_0_7"),
+            func.sum(case((and_(Finding.first_seen >= now - timedelta(days=30),
+                                Finding.first_seen < now - timedelta(days=7)), 1), else_=0)).label("age_8_30"),
+            func.sum(case((and_(Finding.first_seen >= now - timedelta(days=90),
+                                Finding.first_seen < now - timedelta(days=30)), 1), else_=0)).label("age_31_90"),
+            func.sum(case((Finding.first_seen < now - timedelta(days=90), 1), else_=0)).label("age_over_90"),
+            func.sum(case((Finding.priority_score >= 80, 1), else_=0)).label("priority_urgent"),
+            func.sum(case((Finding.priority_score.between(60, 79), 1), else_=0)).label("priority_high"),
+            func.sum(case((Finding.priority_score.between(40, 59), 1), else_=0)).label("priority_elevated"),
+            func.sum(case((Finding.priority_score < 40, 1), else_=0)).label("priority_standard"),
+            func.sum(case((Finding.remediation_due_at.is_not(None), 1), else_=0)).label("tracked"),
+            func.sum(case((Finding.risk_accepted_until > now, 1), else_=0)).label("accepted"),
+            func.sum(case((and_(Finding.remediation_due_at < now, not_accepted), 1), else_=0)).label("overdue"),
+        ).where(*active_scope)).one()
+
+        # SQL aggregation keeps dashboard memory bounded even for a large backlog.
+        aging = {
+            "0_7_days": int(sums.age_0_7 or 0),
+            "8_30_days": int(sums.age_8_30 or 0),
+            "31_90_days": int(sums.age_31_90 or 0),
+            "over_90_days": int(sums.age_over_90 or 0),
+        }
+        priority = {
+            "urgent": int(sums.priority_urgent or 0),
+            "high": int(sums.priority_high or 0),
+            "elevated": int(sums.priority_elevated or 0),
+            "standard": int(sums.priority_standard or 0),
+        }
+        tracked, accepted_count, overdue = (
+            int(sums.tracked or 0), int(sums.accepted or 0), int(sums.overdue or 0),
+        )
+        assets = [{
+            "project": row.project, "asset": row.asset,
+            "active_findings": int(row.active_findings),
+            "priority_sum": int(row.priority_sum or 0),
+            "max_priority": int(row.max_priority or 0),
+        } for row in db.execute(select(
+            Finding.project, Finding.asset,
+            func.count(Finding.id).label("active_findings"),
+            func.sum(Finding.priority_score).label("priority_sum"),
+            func.max(Finding.priority_score).label("max_priority"),
+        ).where(*active_scope).group_by(Finding.project, Finding.asset)
+            .order_by(func.sum(Finding.priority_score).desc(), func.count(Finding.id).desc(),
+                      Finding.project, Finding.asset).limit(5))]
+
+        sla_eligible = max(0, tracked - accepted_count)
+        on_track = max(0, sla_eligible - overdue)
+
+        cutoff = (now - timedelta(days=13)).replace(hour=0, minute=0, second=0, microsecond=0)
+        trend = {cutoff.date() + timedelta(days=offset): {"new": 0, "resolved": 0}
+                 for offset in range(14)}
+        for day, count in db.execute(select(func.date(Finding.first_seen), func.count(Finding.id)).where(
+                *scope, Finding.first_seen >= cutoff).group_by(func.date(Finding.first_seen))):
+            key = day if isinstance(day, str) else day.isoformat()
+            parsed = datetime.fromisoformat(key).date()
+            if parsed in trend:
+                trend[parsed]["new"] = int(count)
+        for day, count in db.execute(select(func.date(Finding.resolved_at), func.count(Finding.id)).where(
+                *scope, Finding.resolved_at >= cutoff).group_by(func.date(Finding.resolved_at))):
+            key = day if isinstance(day, str) else day.isoformat()
+            parsed = datetime.fromisoformat(key).date()
+            if parsed in trend:
+                trend[parsed]["resolved"] = int(count)
+
         return {
             "total_findings": int(total_findings),
             "active_findings": int(active_findings),
@@ -476,6 +587,20 @@ def dashboard_summary(request: Request):
             "active_by_severity": {
                 severity: int(count) for severity, count in severity_rows
             },
+            "urgent_findings": int(sums.urgent or 0),
+            "known_exploited_findings": int(sums.kev or 0),
+            "aging_buckets": aging,
+            "priority_buckets": priority,
+            "sla": {
+                "tracked": tracked,
+                "overdue": overdue,
+                "accepted": accepted_count,
+                "on_track": on_track,
+                "compliance_percent": round(100 * on_track / sla_eligible) if sla_eligible else 100,
+            },
+            "top_assets": assets,
+            "trend": [{"date": day.isoformat(), **counts} for day, counts in trend.items()],
+            "generated_at": now.isoformat() + "Z",
         }
     finally:
         db.close()
@@ -548,6 +673,8 @@ def upsert_asset(payload: AssetUpsert, request: Request):
                           for severity in SEVERITY_WEIGHT}, value=Finding.severity, else_=1)
             db.execute(update(Finding).where(Finding.asset_id == asset.id).values(
                 exposure=asset.exposure, criticality=asset.criticality, risk_score=score))
+            for finding in db.scalars(select(Finding).where(Finding.asset_id == asset.id)):
+                refresh_finding(db, finding, now=now)
         return {"ok": True, "asset": _serialize_asset(asset)}
 
 
@@ -593,12 +720,16 @@ def ingest_signal(payload: SignalIn, request: Request):
             "signal_id": signal.id,
         })
         if resurfaced:
+            finding.resolved_at = None
+        refresh_finding(db, finding, now=now)
+        if resurfaced:
             db.add(Comment(finding_id=finding.id, author="system",
                            content="Finding resurfaced in a later signal and was reopened",
                            action_type="reopened", created_at=now))
         enqueue_finding(db, finding, event_id=signal.id, is_new=is_new)
         return {"accepted": True, "deduped": not is_new, "signal_id": signal.id,
                 "finding_id": finding.id, "risk_score": finding.risk_score,
+                "priority_score": finding.priority_score,
                 "occurrences": finding.occurrences, "fingerprint": fp}
 
 
@@ -679,6 +810,7 @@ def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
         if payload.status is not None and payload.status != finding.status:
             old_status = finding.status
             finding.status = payload.status
+            finding.resolved_at = now if payload.status in {"resolved", "closed"} else None
             changes.append(f"Status changed from '{old_status}' to '{payload.status}'")
 
         if payload.assignee is not None and payload.assignee != finding.assignee:
@@ -706,6 +838,7 @@ def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
                 "id": finding.id,
                 "status": finding.status,
                 "assignee": finding.assignee,
+                "resolved_at": finding.resolved_at.isoformat() + "Z" if finding.resolved_at else None,
             },
             "changes": changes,
         }
@@ -1038,6 +1171,9 @@ def import_scan(payload: ScanImportRequest, request: Request):
                     "file_path": pf.file_path, "line_number": pf.line_number,
                     "references_json": json.dumps(pf.references or []), "tags_json": json.dumps(pf.tags or []),
                 })
+                if resurfaced:
+                    finding.resolved_at = None
+                refresh_finding(db, finding, now=now)
                 if resurfaced:
                     db.add(Comment(finding_id=finding.id, author="system",
                                    content="Finding resurfaced in a later scan and was reopened",

@@ -16,14 +16,22 @@ const finding = (index) => ({
   fingerprint: `fixture-${index}`, tool: 'bandit', title: `Finding ${index}`, severity: 'high',
   asset: 'src/app.py', project: 'payments', asset_id: null, exposure: 'internal', criticality: 'medium',
   status: 'open', assignee: null, risk_score: 70, occurrences: 1, description: 'Synthetic regression evidence',
-  recommendation: 'Synthetic regression recommendation', cwe_id: 79, cve_id: null, cvss_score: 7.1,
+  priority_score: index === 1 ? 85 : 30,
+  priority_reasons: [{ factor: 'High severity', points: 30 }],
+  recommendation: 'Synthetic regression recommendation', cwe_id: 79,
+  cve_id: index === 1 ? 'CVE-2026-10001' : null, cvss_score: 7.1,
+  kev: index === 1, kev_date_added: index === 1 ? '2026-01-01' : null,
+  kev_due_date: index === 1 ? '2026-01-08' : null, kev_ransomware: false,
+  epss_score: null, epss_percentile: null, intelligence_updated_at: null,
   component: 'fixture-package', component_version: '1.0', file_path: 'src/app.py', line_number: index,
   references: ['javascript:alert(1)', 'https://security.invalid/advisory'], tags: ['fixture'],
   first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-01-02T00:00:00Z', signal_id: 'fixture', comments: [],
+  remediation_due_at: '2099-01-31T00:00:00Z', resolved_at: null, sla_status: 'on_track',
+  risk_acceptance: { status: 'none', accepted_at: null, expires_at: null, accepted_by: null, reason: null },
 });
 const asset = (index) => ({ id: String(index), project: 'payments', key: `asset-${index}.invalid`, name: `Asset ${index}`, owner: 'security', environment: 'prod', criticality: 'medium', exposure: 'internal', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' });
 let state;
-function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0, scannerTokens: [], tokenVersion: 0, githubConfigured: true, githubConnections: [], githubRuns: {} }; }
+function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0, scannerTokens: [], tokenVersion: 0, githubConfigured: true, githubConnections: [], githubRuns: {}, intelligence: [{ source: 'cisa_kev', enabled: false, interval_hours: 24, status: 'idle', record_count: 1, last_synced_at: null, next_sync_at: '2099-01-01T00:00:00Z', stale: true, last_error: null }, { source: 'first_epss', enabled: false, interval_hours: 24, status: 'succeeded', record_count: 120, last_synced_at: '2026-01-02T00:00:00Z', next_sync_at: '2099-01-01T00:00:00Z', stale: false, last_error: null }], policies: [{ project: '', critical_days: 7, high_days: 30, medium_days: 90, low_days: 180, info_days: 365, kev_days: 7, updated_at: '2026-01-02T00:00:00Z' }] }; }
 reset();
 const send = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
 const server = createServer(async (req, res) => {
@@ -53,6 +61,8 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/auth/logout') { sessions.delete(token); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
   if (url.pathname === '/auth/password') { sessions.clear(); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
   if (user.role !== 'admin' && ['/users', '/integrations', '/notifications', '/scanner-tokens', '/github-sync'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && req.method !== 'GET' && ['/intelligence', '/remediation'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && url.pathname.endsWith('/risk-acceptance')) return send(res, 403, { detail: 'Administrator required' });
   if (user.role === 'viewer' && req.method !== 'GET' && !url.pathname.startsWith('/saved-views')) return send(res, 403, { detail: 'Read-only account' });
   state.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body, actor: user.username, hasAuthorization: Boolean(req.headers.authorization), hasApiKey: Boolean(req.headers['x-api-key']), hasSpoofedUser: Boolean(req.headers['x-secops-user']) });
   if (url.pathname === '/scanner-tokens') {
@@ -128,7 +138,26 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/health') return send(res, 200, { status: 'ok' });
   if (url.pathname === '/dashboard/summary') {
     if (state.failSummary-- > 0) return send(res, 503, { detail: 'Summary unavailable' });
-    return send(res, 200, { total_findings: 121, active_findings: 121, resolved_findings: 0, critical_findings: 1, assets: 121, active_by_severity: { high: 120 } });
+    return send(res, 200, { total_findings: 121, active_findings: 121, resolved_findings: 0, critical_findings: 1, assets: 121, active_by_severity: { high: 120 }, urgent_findings: 1, known_exploited_findings: 1, aging_buckets: { '0_7_days': 0, '8_30_days': 0, '31_90_days': 0, over_90_days: 121 }, priority_buckets: { urgent: 1, high: 0, elevated: 0, standard: 120 }, sla: { tracked: 121, overdue: 0, accepted: 0, on_track: 121, compliance_percent: 100 }, top_assets: [{ project: 'payments', asset: 'src/app.py', active_findings: 121, priority_sum: 3715, max_priority: 85 }], trend: Array.from({ length: 14 }, (_, index) => ({ date: `2026-01-${String(index + 1).padStart(2, '0')}`, new: index === 0 ? 121 : 0, resolved: 0 })), generated_at: '2026-01-15T00:00:00Z' });
+  }
+  if (url.pathname === '/intelligence/status') {
+    if (req.method === 'GET') return send(res, 200, { sources: state.intelligence });
+  }
+  if (url.pathname.startsWith('/intelligence/status/')) {
+    const source = state.intelligence.find(item => item.source === url.pathname.split('/')[3]);
+    if (!source) return send(res, 404, { detail: 'Source not found' });
+    Object.assign(source, body, { status: body.enabled ? 'queued' : 'idle' });
+    return send(res, 200, { ok: true });
+  }
+  if (url.pathname === '/intelligence/sync') {
+    for (const name of body.sources) state.intelligence.find(item => item.source === name).status = 'queued';
+    return send(res, 202, { queued: body.sources });
+  }
+  if (url.pathname === '/remediation/policies') {
+    if (req.method === 'GET') return send(res, 200, { policies: state.policies });
+    const existing = state.policies.find(policy => policy.project === body.project);
+    if (existing) Object.assign(existing, body); else state.policies.push({ ...body, updated_at: '2026-01-02T00:00:00Z' });
+    return send(res, 200, { policy: body, affected_findings: 121 });
   }
   if (url.pathname === '/integrations') {
     if (state.failIntegrations-- > 0) return send(res, 503, { detail: 'Integration service unavailable' });
@@ -170,6 +199,14 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname.endsWith('/comments')) {
       const comment = { id: String(record.comments.length + 1), author: user.username, content: body.content, action_type: 'comment', created_at: '2026-01-02T00:00:00Z' };
       record.comments.unshift(comment); return send(res, 200, { ok: true, comment });
+    }
+    if (req.method === 'POST' && url.pathname.endsWith('/risk-acceptance')) {
+      record.risk_acceptance = { status: 'active', accepted_at: '2026-01-02T00:00:00Z', expires_at: body.expires_at, accepted_by: user.username, reason: body.reason };
+      return send(res, 200, { ok: true, expires_at: body.expires_at });
+    }
+    if (req.method === 'DELETE' && url.pathname.endsWith('/risk-acceptance')) {
+      record.risk_acceptance = { status: 'none', accepted_at: null, expires_at: null, accepted_by: null, reason: null };
+      res.writeHead(204); return res.end();
     }
     return send(res, 200, record);
   }

@@ -214,29 +214,42 @@ def test_percent_encoded_database_url_does_not_break_migration_configuration(mig
 
 def test_identity_upgrade_preserves_every_existing_workflow_table(migration_engine):
     upgrade(migration_engine, "0003")
-    with Session(migration_engine) as session:
-        asset = Asset(key="api.example.invalid", project="payments", owner="AppSec")
-        imported = ImportRun(actor="scanner", parser="generic-json", content_sha256="a" * 64)
-        session.add_all([asset, imported])
-        session.flush()
-        signal = Signal(tool="generic-json", import_id=imported.id, payload='{"evidence":"retained"}')
-        session.add(signal)
-        session.flush()
-        finding = Finding(
-            fingerprint="b" * 64, tool="generic-json", project=asset.project,
-            title="Preserve this finding", severity="high", asset=asset.key,
-            asset_id=asset.id, signal_id=signal.id, status="investigating", assignee="AppSec",
-        )
-        session.add(finding)
-        session.flush()
-        session.add_all([
-            Comment(finding_id=finding.id, author="Analyst", content="Preserve discussion"),
-            NotificationDelivery(
-                event_key="identity-migration-event", finding_id=finding.id,
-                channel="jira", status="pending", payload='{"evidence":"retained"}',
-            ),
-        ])
-        session.commit()
+    old = sa.MetaData()
+    old.reflect(migration_engine)
+    now = datetime(2026, 1, 20, 12)
+    with migration_engine.begin() as connection:
+        connection.execute(old.tables["assets"].insert(), {
+            "id": "asset-preserved", "key": "api.example.invalid", "project": "payments",
+            "name": "API", "environment": "prod", "owner": "AppSec",
+            "criticality": "medium", "exposure": "internal", "created_at": now, "updated_at": now,
+        })
+        connection.execute(old.tables["imports"].insert(), {
+            "id": "import-preserved", "actor": "scanner", "parser": "generic-json",
+            "project": "payments", "content_sha256": "a" * 64, "status": "completed",
+            "imported": 1, "new_findings": 1, "deduplicated": 0, "created_at": now,
+        })
+        connection.execute(old.tables["signals"].insert(), {
+            "id": "signal-preserved", "tool": "generic-json", "import_id": "import-preserved",
+            "payload": '{"evidence":"retained"}', "created_at": now,
+        })
+        connection.execute(old.tables["findings"].insert(), {
+            "id": "finding-preserved", "fingerprint": "b" * 64, "tool": "generic-json",
+            "project": "payments", "title": "Preserve this finding", "severity": "high",
+            "asset": "api.example.invalid", "asset_id": "asset-preserved", "exposure": "internal",
+            "criticality": "medium", "status": "investigating", "assignee": "AppSec",
+            "risk_score": 1, "occurrences": 1, "references_json": "[]", "tags_json": "[]",
+            "first_seen": now, "last_seen": now, "signal_id": "signal-preserved",
+        })
+        connection.execute(old.tables["comments"].insert(), {
+            "id": "comment-preserved", "finding_id": "finding-preserved", "author": "Analyst",
+            "content": "Preserve discussion", "created_at": now,
+        })
+        connection.execute(old.tables["notification_deliveries"].insert(), {
+            "id": "delivery-preserved", "event_key": "identity-migration-event",
+            "finding_id": "finding-preserved", "channel": "jira", "status": "pending",
+            "payload": '{"evidence":"retained"}', "attempts": 0, "next_attempt_at": now,
+            "created_at": now, "updated_at": now,
+        })
 
     original = sa.MetaData()
     original.reflect(migration_engine)
@@ -344,6 +357,6 @@ def test_identity_downgrade_refuses_persisted_data_before_schema_changes(migrati
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0006"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007"
         assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
