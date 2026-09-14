@@ -14,6 +14,9 @@ async function throwApiError(res: Response, method: string, path: string): Promi
 const STATIC_API_PATHS = new Map<string, string>([
   ["/assets", "/api/assets"],
   ["/assets/upsert", "/api/assets/upsert"],
+  ["/ai-security/evaluation", "/api/ai-security/evaluation"],
+  ["/ai-security/run", "/api/ai-security/run"],
+  ["/ai-security/scenarios", "/api/ai-security/scenarios"],
   ["/dashboard/summary", "/api/dashboard/summary"],
   ["/findings", "/api/findings"],
   ["/import/scan", "/api/import/scan"],

@@ -21,6 +21,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .ai_security import (
+    LabRunRequest,
+    evaluation_summary as ai_security_evaluation_summary,
+    public_scenarios as public_ai_security_scenarios,
+    run_scenario as run_ai_security_scenario,
+)
 from .auth import api_key_middleware
 from .access import principal, project_filters, require_project, require_write, require_admin
 from .accounts import bootstrap_admin, router as accounts_router
@@ -863,6 +869,38 @@ def test_slack(request: Request):
         })
     return {"ok": True, "notification_id": notification_id,
             "message": "Test notification queued; check delivery history for its outcome"}
+
+
+# -----------------------------
+# Secure AI copilot lab
+# -----------------------------
+@app.get("/ai-security/scenarios")
+def get_ai_security_scenarios():
+    """Return the synthetic corpus without executable candidate plans."""
+
+    items = public_ai_security_scenarios()
+    return {
+        "simulation": True,
+        "count": len(items),
+        "scenarios": items,
+    }
+
+
+@app.get("/ai-security/evaluation")
+def get_ai_security_evaluation():
+    """Return reproducible aggregate results for the bundled corpus."""
+
+    return {"simulation": True, **ai_security_evaluation_summary()}
+
+
+@app.post("/ai-security/run")
+def run_ai_security_lab(payload: LabRunRequest):
+    """Evaluate one pre-authored candidate plan without calling a model or tool."""
+
+    try:
+        return run_ai_security_scenario(payload.scenario_id, payload.mode)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="AI security scenario not found") from error
 
 
 # -----------------------------
