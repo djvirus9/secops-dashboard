@@ -113,6 +113,26 @@ still contain sensitive security findings; handle them accordingly.
 
 See the [threat model](docs/threat-model.md) for trust boundaries and residual risks.
 
+## Secure AI copilot lab
+
+The AI Security page models the boundary between an untrusted model-generated
+plan and SecOps data or tools. It compares an intentionally unsafe prompt-only
+baseline with deterministic controls for tenant authorization, least-privilege
+tools, approval gates, safe rendering, synthetic-secret detection, and execution
+budgets.
+
+The lab does not call an AI provider or execute candidate tool calls. All ten
+scenarios use synthetic data, making the evaluation safe and reproducible:
+
+```bash
+PYTHONPATH=backend python -m app.ai_security
+cd backend && pytest -q tests/test_ai_security.py
+```
+
+Read the [AI security threat model](docs/ai-security-threat-model.md) and
+[evaluation report](docs/ai-security-evaluation.md) before connecting any real
+model or tool.
+
 ## Run with Docker Compose
 
 Requirements: Docker with Compose v2. For a public deployment, first follow the
@@ -269,6 +289,8 @@ with dependency audits, CodeQL, production browser tests, and Docker builds.
   browser account sessions and password changes.
 - Findings, assets, risks, imports, comments, and CSV export: role and project access.
 - Saved views: private to their owning user session.
+- `GET /ai-security/scenarios`, `GET /ai-security/evaluation`, and
+  `POST /ai-security/run`: authenticated, synthetic AI control-plane lab.
 - Account management, integration status/tests, notification review, and authenticated
   OpenAPI documentation: administrative access.
 - `MAX_IMPORT_REQUEST_BYTES`, `MAX_SCAN_BYTES`, and `MAX_FINDINGS_PER_IMPORT`
