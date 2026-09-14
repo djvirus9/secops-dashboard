@@ -56,7 +56,7 @@ test('findings pagination reaches records after 100 and filters reset the offset
   await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page.getByRole('navigation', { name: 'Pagination' }).getByRole('status')).toHaveText('1–33 of 33');
   const state = await (await request.get(`${backend}/__test/state`)).json();
-  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings').query).toMatchObject({ offset: '0', limit: '50', q: 'Finding 1', severity: 'high', project: 'payments', sort: 'risk_desc' });
+  expect(state.requests.findLast((entry: { path: string }) => entry.path === '/findings').query).toMatchObject({ offset: '0', limit: '50', q: 'Finding 1', severity: 'high', project: 'payments', sort: 'priority_desc' });
 });
 
 test('a failed finding save preserves the draft and allows a successful retry and comment', async ({ page, request }) => {
@@ -133,12 +133,39 @@ test('imports include project identity and disable unavailable parsers', async (
   expect(state.requests.findLast((entry: { path: string }) => entry.path === '/import/scan')).toMatchObject({ path: '/import/scan', body: { project: 'payments-api', parser: 'bandit' } });
 });
 
+test('remediation intelligence is transparent and risk acceptance remains explicit', async ({ page, request }) => {
+  await page.goto('/remediation');
+  await expect(page.getByRole('heading', { name: 'Prioritize what attackers are likely to use' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'CISA Known Exploited Vulnerabilities' })).toBeVisible();
+  await expect(page.getByText('Critical / high / medium / low / info', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh both sources' }).click();
+  await expect(page.getByRole('status')).toContainText('Both intelligence refreshes were queued.');
+
+  await page.goto(`/findings/${findingId}`);
+  await expect(page.getByText('85/100', { exact: true })).toBeVisible();
+  await expect(page.getByText('Known exploited', { exact: true }).first()).toBeVisible();
+  await page.getByLabel('Business justification').fill('Temporary vendor exception with reviewed compensating controls.');
+  await page.getByRole('button', { name: 'Accept risk', exact: true }).click();
+  await expect(page.getByText('active', { exact: true })).toBeVisible();
+  let state = await (await request.get(`${backend}/__test/state`)).json();
+  expect(state.findings[0].risk_acceptance).toMatchObject({ status: 'active', accepted_by: 'reviewer' });
+  await page.getByRole('button', { name: 'Revoke acceptance', exact: true }).click();
+  await expect(page.getByText('active', { exact: true })).toHaveCount(0);
+  state = await (await request.get(`${backend}/__test/state`)).json();
+  expect(state.findings[0].risk_acceptance.status).toBe('none');
+});
+
 test('mobile navigation and forms fit the viewport and retain accessible names', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const path of ['/', '/integrations', '/risks', '/scanner-tokens', '/github-sync', `/findings/${findingId}`]) {
+  for (const path of ['/', '/integrations', '/risks', '/scanner-tokens', '/github-sync', '/remediation', '/ai-security', `/findings/${findingId}`]) {
     await page.goto(path);
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const widths = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+      overflowers: Array.from(document.querySelectorAll('*')).filter(element => element.getBoundingClientRect().right > window.innerWidth + 1).slice(0, 4).map(element => ({ tag: element.tagName, className: element.className, text: element.textContent?.slice(0, 60) })),
+    }));
+    expect(widths.page, `${path} must not overflow the ${widths.viewport}px viewport: ${JSON.stringify(widths.overflowers)}`).toBeLessThanOrEqual(widths.viewport);
   }
   await expect(page.getByLabel('Status', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Assignee', { exact: true })).toBeVisible();

@@ -127,8 +127,10 @@ jobs:
       - run: python3 infra/smoke.py
       - name: Verify unconfigured GitHub worker is healthy
         run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T github-worker python -m app.github_sync.worker --health
+      - name: Verify idle intelligence worker is healthy
+        run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T intelligence-worker python -m app.remediation.worker --health
       - run: infra/backup.sh /tmp/secops-ci.dump
-      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 SECOPS_EXPECTED_SCANNER_TOKENS=1 SECOPS_EXPECTED_GITHUB_CONNECTIONS=1 SECOPS_EXPECTED_GITHUB_SYNC_RUNS=0 SECOPS_EXPECTED_GITHUB_ALERTS=0 infra/verify-restore.sh /tmp/secops-ci.dump
+      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 SECOPS_EXPECTED_SCANNER_TOKENS=1 SECOPS_EXPECTED_GITHUB_CONNECTIONS=1 SECOPS_EXPECTED_GITHUB_SYNC_RUNS=0 SECOPS_EXPECTED_GITHUB_ALERTS=0 SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE=0 SECOPS_EXPECTED_REMEDIATION_POLICIES=1 SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES=2 infra/verify-restore.sh /tmp/secops-ci.dump
       - if: failure()
         run: docker compose -f "$SECOPS_COMPOSE_FILE" logs --no-color --tail 100
       - if: always()

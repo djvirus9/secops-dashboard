@@ -25,6 +25,13 @@ services:
     build:
       context: ../backend
 
+  intelligence-worker:
+    extends:
+      file: compose.services.yml
+      service: intelligence-worker
+    build:
+      context: ../backend
+
   frontend:
     extends:
       file: compose.services.yml

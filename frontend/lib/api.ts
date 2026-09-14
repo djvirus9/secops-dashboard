@@ -27,13 +27,16 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/health", "/api/health"],
   ["/risks", "/api/risks"],
   ["/imports", "/api/imports"],
+  ["/intelligence/status", "/api/intelligence/status"],
+  ["/intelligence/sync", "/api/intelligence/sync"],
   ["/notifications", "/api/notifications"],
+  ["/remediation/policies", "/api/remediation/policies"],
   ["/scanner-tokens", "/api/scanner-tokens"],
   ["/github-sync", "/api/github-sync"],
   ...["/auth/login", "/auth/logout", "/auth/me", "/auth/password", "/users", "/saved-views", "/findings/bulk", "/findings/export.csv"].map((path): [string, string] => [path, `/api${path}`]),
 ]);
 const FINDING_PATH =
-  /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/comments)?$/i;
+  /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/(?:comments|risk-acceptance))?$/i;
 
 function toApiUrl(path: string): string {
   const managedPath = /^\/(scanner-tokens|github-sync)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(revoke|rotate|sync|runs))?$/i.exec(path);
@@ -44,6 +47,7 @@ function toApiUrl(path: string): string {
     throw new Error("Unsupported API path");
   }
   if (/^\/(users|saved-views)\/[0-9a-f-]{36}$/i.test(path)) return `/api${path}`;
+  if (/^\/intelligence\/status\/(?:cisa_kev|first_epss)$/.test(path)) return `/api${path}`;
   const retryPath = /^\/notifications\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/retry$/i.exec(path);
   if (retryPath) return `/api/notifications/${encodeURIComponent(retryPath[1])}/retry`;
   const staticPath = STATIC_API_PATHS.get(path);
@@ -55,7 +59,7 @@ function toApiUrl(path: string): string {
   }
 
   const findingId = encodeURIComponent(findingPath[1]);
-  const suffix = findingPath[2] === "/comments" ? "/comments" : "";
+  const suffix = findingPath[2] || "";
   return `/api/findings/${findingId}${suffix}`;
 }
 
@@ -89,6 +93,16 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) return throwApiError(res, "PATCH", path);
+  return res.json();
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(toApiUrl(path), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return throwApiError(res, "PUT", path);
   return res.json();
 }
 

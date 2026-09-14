@@ -1,9 +1,12 @@
 # Shared runtime settings for source and prebuilt-image deployments.
-x-backend-environment: &backend-environment
+x-database-environment: &database-environment
   PGHOST: postgres
   PGUSER: ${POSTGRES_USER:-secops}
   PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
   PGDATABASE: ${POSTGRES_DB:-secops}
+
+x-backend-environment: &backend-environment
+  <<: *database-environment
   API_KEY: ${API_KEY:?API_KEY is required}
   INGEST_API_KEY: ${INGEST_API_KEY:?INGEST_API_KEY is required}
   DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-}
@@ -35,6 +38,36 @@ x-backend-environment: &backend-environment
   ALLOW_INSECURE_NO_AUTH: "false"
   NOTIFICATION_POLL_SECONDS: ${NOTIFICATION_POLL_SECONDS:-5}
   NOTIFICATION_MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS:-5}
+  INTELLIGENCE_POLL_SECONDS: ${INTELLIGENCE_POLL_SECONDS:-5}
+
+x-notification-environment: &notification-environment
+  <<: *database-environment
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+  JIRA_EMAIL: ${JIRA_EMAIL:-}
+  JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+  JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+  JIRA_ISSUE_TYPE: ${JIRA_ISSUE_TYPE:-Bug}
+  JIRA_PRIORITY_CRITICAL: ${JIRA_PRIORITY_CRITICAL:-}
+  JIRA_PRIORITY_HIGH: ${JIRA_PRIORITY_HIGH:-}
+  JIRA_PRIORITY_MEDIUM: ${JIRA_PRIORITY_MEDIUM:-}
+  JIRA_PRIORITY_LOW: ${JIRA_PRIORITY_LOW:-}
+  JIRA_PRIORITY_INFO: ${JIRA_PRIORITY_INFO:-}
+  IMPORT_TIMEOUT_SECONDS: ${IMPORT_TIMEOUT_SECONDS:-900}
+  NOTIFICATION_POLL_SECONDS: ${NOTIFICATION_POLL_SECONDS:-5}
+  NOTIFICATION_MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS:-5}
+
+x-github-environment: &github-environment
+  <<: *database-environment
+  GITHUB_SYNC_TOKEN: ${GITHUB_SYNC_TOKEN:-}
+  GITHUB_SYNC_POLL_SECONDS: ${GITHUB_SYNC_POLL_SECONDS:-5}
+  # Integration presence controls whether imports enqueue durable deliveries;
+  # only the notification worker performs outbound Slack/Jira delivery.
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+  JIRA_EMAIL: ${JIRA_EMAIL:-}
+  JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+  JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
 
 services:
   postgres:
@@ -75,8 +108,8 @@ services:
   notification-worker:
     restart: unless-stopped
     init: true
-    environment: *backend-environment
-    command: ["sh", "-c", "python -m app.deployment && exec python -m app.notifications.worker"]
+    environment: *notification-environment
+    command: ["sh", "-c", "python -m app.deployment --worker notification && exec python -m app.notifications.worker"]
     depends_on:
       backend:
         condition: service_healthy
@@ -89,16 +122,29 @@ services:
   github-worker:
     restart: unless-stopped
     init: true
-    environment:
-      <<: *backend-environment
-      GITHUB_SYNC_TOKEN: ${GITHUB_SYNC_TOKEN:-}
-      GITHUB_SYNC_POLL_SECONDS: ${GITHUB_SYNC_POLL_SECONDS:-5}
-    command: ["sh", "-c", "python -m app.deployment && exec python -m app.github_sync.worker"]
+    environment: *github-environment
+    command: ["sh", "-c", "python -m app.deployment --worker github && exec python -m app.github_sync.worker"]
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-m", "app.github_sync.worker", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  intelligence-worker:
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *database-environment
+      INTELLIGENCE_POLL_SECONDS: ${INTELLIGENCE_POLL_SECONDS:-5}
+    command: ["sh", "-c", "python -m app.deployment --worker intelligence && exec python -m app.remediation.worker"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.remediation.worker", "--health"]
       interval: 30s
       timeout: 5s
       retries: 3

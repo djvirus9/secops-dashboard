@@ -179,8 +179,11 @@ class LocalHelperTests(unittest.TestCase):
             env = local.environment(5050, 8000)
             for name in ("backend", "github-worker"):
                 self.assertEqual(local.service_environment(name, env)["GITHUB_SYNC_TOKEN"], token)
-            for name in ("frontend", "worker", "migration"):
+            for name in ("frontend", "worker", "intelligence-worker", "migration"):
                 self.assertNotIn("GITHUB_SYNC_TOKEN", local.service_environment(name, env))
+            for name in ("frontend", "worker", "github-worker", "intelligence-worker", "migration"):
+                self.assertNotIn("API_KEY", local.service_environment(name, env))
+                self.assertNotIn("INGEST_API_KEY", local.service_environment(name, env))
 
     def test_github_token_refuses_getpass_echo_fallback(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \

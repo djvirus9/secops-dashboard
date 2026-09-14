@@ -8,6 +8,15 @@ from urllib.parse import urlsplit
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
+WORKER_LIMITS = {
+    "notification": {
+        "IMPORT_TIMEOUT_SECONDS": (900, 1, 3600),
+        "NOTIFICATION_POLL_SECONDS": (5, 1, 300),
+        "NOTIFICATION_MAX_ATTEMPTS": (5, 1, 20),
+    },
+    "github": {"GITHUB_SYNC_POLL_SECONDS": (5, 1, 300)},
+    "intelligence": {"INTELLIGENCE_POLL_SECONDS": (5, 1, 300)},
+}
 
 
 def validate_session_settings() -> None:
@@ -59,20 +68,38 @@ def _require_secret(name: str, minimum: int, value: str | None = None) -> None:
         raise ValueError(f"{name} must be a non-placeholder secret of at least {minimum} characters")
 
 
-def validate_backend_settings() -> None:
+def _validate_github_token() -> None:
     github_token = os.environ.get("GITHUB_SYNC_TOKEN", "")
     if github_token and (not 32 <= len(github_token) <= 512 or not github_token.isascii()
                          or any(ord(char) < 33 or ord(char) > 126 for char in github_token)):
         raise ValueError("GITHUB_SYNC_TOKEN must be 32–512 printable ASCII characters without whitespace")
+
+
+def _validate_database() -> None:
+    from app.db import get_database_url
+    database_url = get_database_url()
+    if database_url.get_backend_name() == "postgresql":
+        _require_secret("PostgreSQL password", 24, database_url.password or "")
+
+
+def _validate_limits(limits: dict[str, tuple[int, int, int]]) -> None:
+    for name, (default, minimum, maximum) in limits.items():
+        try:
+            value = int(os.environ.get(name, str(default)))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+
+
+def validate_backend_settings() -> None:
+    _validate_github_token()
     if os.environ.get("ALLOW_INSECURE_NO_AUTH", "").lower() not in TRUE_VALUES:
         _require_secret("API_KEY", 32)
         _require_secret("INGEST_API_KEY", 32)
         if os.environ["API_KEY"] == os.environ["INGEST_API_KEY"]:
             raise ValueError("API_KEY and INGEST_API_KEY must be different")
-    from app.db import get_database_url
-    database_url = get_database_url()
-    if database_url.get_backend_name() == "postgresql":
-        _require_secret("PostgreSQL password", 24, database_url.password or "")
+    _validate_database()
 
     limits = {
         "MAX_REQUEST_BYTES": (1048576, 1, 10485760),
@@ -82,25 +109,34 @@ def validate_backend_settings() -> None:
         "IMPORT_TIMEOUT_SECONDS": (900, 1, 3600),
         "NOTIFICATION_POLL_SECONDS": (5, 1, 300),
         "GITHUB_SYNC_POLL_SECONDS": (5, 1, 300),
+        "INTELLIGENCE_POLL_SECONDS": (5, 1, 300),
         "NOTIFICATION_MAX_ATTEMPTS": (5, 1, 20),
         "SESSION_TTL_SECONDS": (43200, 300, 604800),
         "SESSION_IDLE_TIMEOUT_SECONDS": (1800, 60, 86400),
     }
-    for name, (default, minimum, maximum) in limits.items():
-        try:
-            value = int(os.environ.get(name, str(default)))
-        except ValueError as exc:
-            raise ValueError(f"{name} must be an integer") from exc
-        if not minimum <= value <= maximum:
-            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    _validate_limits(limits)
     if int(os.environ.get("SESSION_IDLE_TIMEOUT_SECONDS", "1800")) > int(os.environ.get("SESSION_TTL_SECONDS", "43200")):
         raise ValueError("SESSION_IDLE_TIMEOUT_SECONDS must not exceed SESSION_TTL_SECONDS")
     validate_session_settings()
 
 
+def validate_worker_settings(worker: str) -> None:
+    if worker not in WORKER_LIMITS:
+        raise ValueError("Unknown worker type")
+    _validate_database()
+    if worker == "github":
+        _validate_github_token()
+    _validate_limits(WORKER_LIMITS[worker])
+
+
 def main() -> int:
     try:
-        validate_backend_settings()
+        worker = None
+        if len(sys.argv) == 3 and sys.argv[1] == "--worker":
+            worker = sys.argv[2]
+        elif len(sys.argv) != 1:
+            raise ValueError("Usage: python -m app.deployment [--worker notification|github|intelligence]")
+        validate_worker_settings(worker) if worker else validate_backend_settings()
     except ValueError as exc:
         print(f"Invalid deployment configuration: {exc}", file=sys.stderr)
         return 1

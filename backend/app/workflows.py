@@ -166,6 +166,7 @@ def bulk_update(payload: BulkUpdate, request: Request):
             if payload.status is not None and payload.status != finding.status:
                 changes.append(f"Status changed from '{finding.status}' to '{payload.status}'")
                 finding.status = payload.status
+                finding.resolved_at = now if payload.status in {"resolved", "closed"} else None
             if "assignee" in payload.model_fields_set:
                 assignee = payload.assignee or None
                 if assignee != finding.assignee:
@@ -180,9 +181,10 @@ def bulk_update(payload: BulkUpdate, request: Request):
     return {"ok": True, "updated": changed}
 
 
-EXPORT_COLUMNS = ("id", "project", "tool", "title", "severity", "status", "assignee", "risk_score",
+EXPORT_COLUMNS = ("id", "project", "tool", "title", "severity", "status", "assignee", "priority_score", "risk_score",
                   "asset", "component", "component_version", "cve_id", "cvss_score", "file_path",
-                  "line_number", "first_seen", "last_seen", "occurrences")
+                  "line_number", "kev", "epss_score", "epss_percentile", "remediation_due_at",
+                  "risk_accepted_until", "first_seen", "last_seen", "resolved_at", "occurrences")
 
 
 def csv_cell(value):

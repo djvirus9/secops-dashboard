@@ -113,8 +113,8 @@ def main():
     if args.health:
         max_age = max(180, positive_int_setting("NOTIFICATION_POLL_SECONDS", 5) * 3)
         raise SystemExit(0 if HEARTBEAT.exists() and time.time() - HEARTBEAT.stat().st_mtime < max_age else 1)
-    from ..deployment import validate_backend_settings
-    validate_backend_settings()
+    from ..deployment import validate_worker_settings
+    validate_worker_settings("notification")
     logging.basicConfig(level=logging.INFO)
     stopping = False
 

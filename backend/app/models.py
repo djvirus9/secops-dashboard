@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, String, Integer, Float, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, String, Integer, Float, Date, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -74,6 +74,8 @@ class Finding(Base):
     assignee: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
     risk_score: Mapped[int] = mapped_column(Integer, default=1)
+    priority_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    priority_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
     occurrences: Mapped[int] = mapped_column(Integer, default=1)
 
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -81,6 +83,13 @@ class Finding(Base):
     cwe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cve_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     cvss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kev: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    kev_date_added: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kev_due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kev_ransomware: Mapped[bool] = mapped_column(Boolean, default=False)
+    epss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
+    intelligence_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     line_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     references_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -88,6 +97,12 @@ class Finding(Base):
 
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    remediation_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    risk_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    risk_accepted_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    risk_accepted_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    risk_acceptance_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     signal_id: Mapped[str] = mapped_column(String, index=True)
 
@@ -224,3 +239,50 @@ class ScannerToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class VulnerabilityIntelligence(Base):
+    __tablename__ = "vulnerability_intelligence"
+
+    cve_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kev: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    kev_date_added: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kev_due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    kev_ransomware: Mapped[bool] = mapped_column(Boolean, default=False)
+    kev_required_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    epss_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kev_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    epss_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class RemediationPolicy(Base):
+    __tablename__ = "remediation_policies"
+
+    # Empty project is the deployment-wide fallback. Exact project rows override it.
+    project: Mapped[str] = mapped_column(String(255), primary_key=True)
+    critical_days: Mapped[int] = mapped_column(Integer, default=7)
+    high_days: Mapped[int] = mapped_column(Integer, default=30)
+    medium_days: Mapped[int] = mapped_column(Integer, default=90)
+    low_days: Mapped[int] = mapped_column(Integer, default=180)
+    info_days: Mapped[int] = mapped_column(Integer, default=365)
+    kev_days: Mapped[int] = mapped_column(Integer, default=7)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class IntelligenceSyncState(Base):
+    __tablename__ = "intelligence_sync_states"
+
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    status: Mapped[str] = mapped_column(String(20), default="idle")
+    next_sync_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    record_count: Mapped[int] = mapped_column(Integer, default=0)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

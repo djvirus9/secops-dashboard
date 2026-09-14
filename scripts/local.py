@@ -85,6 +85,7 @@ def environment(port: int, api_port: int) -> dict[str, str]:
     # Opt in only through this installation's private file, never ambient tokens.
     env["GITHUB_SYNC_TOKEN"] = read_github_token()
     env["GITHUB_SYNC_POLL_SECONDS"] = "5"
+    env["INTELLIGENCE_POLL_SECONDS"] = "5"
     # Local demos cannot accidentally send real messages using ambient credentials.
     for key in ("SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY"):
         env[key] = ""
@@ -143,9 +144,30 @@ def github_token(clear: bool = False) -> None:
 def service_environment(name: str, env: dict[str, str]) -> dict[str, str]:
     if name == "frontend":
         return frontend_environment(env)
-    if name in {"backend", "github-worker"}:
+    if name == "backend":
         return env
-    return {key: value for key, value in env.items() if key != "GITHUB_SYNC_TOKEN"}
+    common = {
+        "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ",
+        "DATABASE_URL", "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED",
+    }
+    allowed = set(common)
+    if name == "worker":
+        allowed.update({
+            "IMPORT_TIMEOUT_SECONDS", "NOTIFICATION_POLL_SECONDS", "NOTIFICATION_MAX_ATTEMPTS",
+            "SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
+            "JIRA_PROJECT_KEY", "JIRA_ISSUE_TYPE", "JIRA_PRIORITY_CRITICAL",
+            "JIRA_PRIORITY_HIGH", "JIRA_PRIORITY_MEDIUM", "JIRA_PRIORITY_LOW", "JIRA_PRIORITY_INFO",
+        })
+    elif name == "github-worker":
+        # The sync worker needs integration presence only to create durable
+        # notification jobs; it never sends them itself.
+        allowed.update({
+            "GITHUB_SYNC_TOKEN", "GITHUB_SYNC_POLL_SECONDS", "SLACK_WEBHOOK_URL",
+            "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY",
+        })
+    elif name == "intelligence-worker":
+        allowed.add("INTELLIGENCE_POLL_SECONDS")
+    return {key: value for key, value in env.items() if key in allowed}
 
 
 def frontend_environment(env: dict[str, str]) -> dict[str, str]:
@@ -308,6 +330,7 @@ def serve(run_id: str, port: int, api_port: int) -> None:
                 ("backend", [str(PYTHON), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(api_port)], ROOT / "backend"),
                 ("worker", [str(PYTHON), "-m", "app.notifications.worker"], ROOT / "backend"),
                 ("github-worker", [str(PYTHON), "-m", "app.github_sync.worker"], ROOT / "backend"),
+                ("intelligence-worker", [str(PYTHON), "-m", "app.remediation.worker"], ROOT / "backend"),
                 ("frontend", [shutil.which("node"), str(ROOT / "frontend/.next/standalone/server.js")], ROOT / "frontend"),
             ]
             for name, command, directory in commands:

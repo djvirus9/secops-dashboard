@@ -2,7 +2,7 @@
 
 ## Deployment boundary
 
-Deploy one backend, notification worker and GitHub sync worker for a trusted security team, with
+Deploy one backend, notification worker, GitHub sync worker, and vulnerability-intelligence worker for a trusted security team, with
 PostgreSQL persistence and a TLS reverse proxy in front of Next.js. Projects are
 both identity namespaces and access grants for local user accounts. Administrators
 can access every project; analysts can modify granted projects and viewers can
@@ -155,14 +155,18 @@ curl --fail http://127.0.0.1:8000/ready
 
 For source mode, replace `up --no-build --wait` with `up --build --wait`.
 
-All five services should be running and healthy. Backend startup validates its
+All six services should be running and healthy. Backend startup validates its
 configuration and upgrades the schema before serving; workers and frontend wait
 for backend readiness. Each worker health check verifies a recent successful
-database polling heartbeat. The GitHub worker is idle and healthy without a token.
+database polling heartbeat. Compose exposes administrative, ingestion, and browser
+bootstrap credentials only to the backend; workers receive only their database,
+polling, and required integration settings. The GitHub worker is idle and healthy without a token.
 Its heartbeat does not prove remote access; inspect GitHub Sync run history. A green heartbeat does not prove Slack/Jira delivery;
-inspect the Notifications page for failed or uncertain deliveries.
+inspect the Notifications page for failed or uncertain deliveries. The intelligence
+worker stays idle until a source is enabled or queued; inspect source freshness on
+Remediation because its heartbeat does not prove CISA/FIRST reachability.
 
-The images run as non-root users. Backend and both workers use Python 3.14; frontend
+The images run as non-root users. Backend and all three workers use Python 3.14; frontend
 build and runtime default to Node.js 24 LTS. To evaluate Node 26, set
 `FRONTEND_NODE_MAJOR=26` in `.env` and rebuild with the source Compose file; direct Docker builds
 can use `--build-arg NODE_MAJOR=26`. This changes all frontend image stages.
@@ -186,6 +190,7 @@ database/disk growth, backup age, and host free disk space.
 | `NOTIFICATION_POLL_SECONDS` | 5 | 1–300 | Idle worker polling interval |
 | `NOTIFICATION_MAX_ATTEMPTS` | 5 | 1–20 | Automatic notification attempts |
 | `GITHUB_SYNC_POLL_SECONDS` | 5 | 1–300 | GitHub worker's idle database polling interval |
+| `INTELLIGENCE_POLL_SECONDS` | 5 | 1–300 | Intelligence worker's idle database polling interval |
 
 The sample proxy caps the HTTP body at 13 MB. Keep proxy, frontend, and backend
 limits consistent when changing them; JSON escaping can make an HTTP request
@@ -245,7 +250,8 @@ infra/verify-restore.sh /secure/backups/secops-before-upgrade.dump
 `backup.sh` uses `pg_dump --format=custom`, rejects an existing output filename,
 and checks archive readability before publishing the file. `verify-restore.sh`
 restores into a newly created temporary database, checks findings, comments,
-users, sessions, saved views, scanner tokens and GitHub state, and removes only that temporary database afterward. It never replaces
+users, sessions, saved views, scanner tokens, GitHub state, intelligence cache,
+SLA policies, and intelligence source state, and removes only that temporary database afterward. It never replaces
 the active database. Use `SECOPS_ENV_FILE=/path/to/operator.env` if needed.
 For image mode, also set `SECOPS_COMPOSE_FILE=infra/docker-compose.images.yml`;
 its image references must be present in that environment file or exported shell.
@@ -254,6 +260,8 @@ counts to require an exact match. `SECOPS_EXPECTED_USERS`, `SECOPS_EXPECTED_SESS
 and `SECOPS_EXPECTED_SAVED_VIEWS` optionally check identity/workflow tables;
 `SECOPS_EXPECTED_SCANNER_TOKENS`, `SECOPS_EXPECTED_GITHUB_CONNECTIONS`,
 `SECOPS_EXPECTED_GITHUB_SYNC_RUNS` and `SECOPS_EXPECTED_GITHUB_ALERTS` check 0.3 state.
+`SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE`, `SECOPS_EXPECTED_REMEDIATION_POLICIES`,
+and `SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES` check 0.4 state.
 session counts include revoked sessions. A mismatch fails verification and still
 removes the temporary restore database. Older 0.1 backups without these tables
 report zero and explicitly report the table as absent. CI requires one synthetic
@@ -269,7 +277,7 @@ name, and verify it before changing the application's database target. Example
 for a database named `secops_restored`, using the existing cluster:
 
 ```bash
-docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" stop frontend backend notification-worker github-worker
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" stop frontend backend notification-worker github-worker intelligence-worker
 docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec postgres sh -c 'createdb -U "$POSTGRES_USER" secops_restored'
 docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d secops_restored --exit-on-error --no-owner --no-privileges' < /secure/backups/secops-before-upgrade.dump
 ```
@@ -281,7 +289,7 @@ upgrade or recovery: it deletes the persistent Compose volume.
 
 ## Upgrade and legacy database adoption
 
-1. Stop frontend/backend/both worker writers; keep PostgreSQL available.
+1. Stop frontend/backend/all worker writers; keep PostgreSQL available.
 2. Create and restore-verify a backup. Record the running commit and schema revision.
 3. Pull the candidate release digests (or build source images) and test the upgrade against a restored copy first.
 4. For a versioned database, run the normal migration and restart sequence.
@@ -337,6 +345,10 @@ Revisions 0005 and 0006 add scanner-token inventory and GitHub connections/run/a
 state respectively. A 0.2 database upgrades normally without re-creating accounts
 or changing passwords, sessions, findings or saved views. GitHub remains idle until
 an operator adds a server credential and an administrator configures repositories.
+Revision 0007 adds remediation policies, cached KEV/EPSS evidence, worker state,
+priority explanations, SLA deadlines, resolution timestamps, and expiring risk
+acceptance. Existing finding identity and triage are preserved; only new priority
+and deadline fields are backfilled. See [remediation intelligence](remediation-intelligence.md).
 For the local helper, stop services and copy the complete `.local` directory to
 protected backup storage before updating source; start applies migrations to the
 same `.local/secops.db`. Do not delete `.local` or replace its initial credentials
@@ -361,6 +373,21 @@ Missing alerts never imply resolution; only reported source state changes are ap
 Use `python -m app.github_sync.worker --health` inside that service for a heartbeat
 check. `--once` performs one polling cycle and can make real GitHub reads when
 configured; it is not a dry run. Do not execute live integration checks in CI.
+
+## Vulnerability-intelligence operations
+
+The `intelligence-worker` receives database credentials but no API, ingestion,
+GitHub, Slack, or Jira secret. Sources are off by default. An administrator can queue or schedule
+CISA KEV and FIRST EPSS on Remediation; disabling a source cancels queued work,
+fences an in-progress refresh, and retains cached evidence. Permit outbound HTTPS only to `www.cisa.gov` and
+`api.first.org` if the deployment uses an egress allowlist.
+
+Use `python -m app.remediation.worker --health` inside the service to verify recent
+database polling. `--once` can make a real feed request and is not a dry run.
+Monitor each source's last successful sync, stale flag, next attempt, record count,
+and sanitized failure. A failed refresh retains the last successful evidence.
+Review [remediation intelligence and SLA operations](remediation-intelligence.md)
+for the scoring formula, expiry behavior, data disclosure, and recovery limits.
 
 Schema changes may make an older binary incompatible. Roll back by restoring a
 verified backup into a new database and using the matching old release. A schema

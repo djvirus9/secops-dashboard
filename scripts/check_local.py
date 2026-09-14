@@ -65,6 +65,9 @@ def main() -> None:
         subprocess.run([str(ROOT / ".venv/bin/python"), "-m", "app.github_sync.worker", "--health"],
                        cwd=ROOT / "backend", check=True, capture_output=True,
                        env={**os.environ, "DATABASE_URL": f"sqlite:///{LOCAL / 'secops.db'}", "GITHUB_SYNC_TOKEN": ""})
+        subprocess.run([str(ROOT / ".venv/bin/python"), "-m", "app.remediation.worker", "--health"],
+                       cwd=ROOT / "backend", check=True, capture_output=True,
+                       env={**os.environ, "DATABASE_URL": f"sqlite:///{LOCAL / 'secops.db'}"})
         for name in ("API_KEY", "INGEST_API_KEY", "DASHBOARD_PASSWORD"):
             output = run("credentials", capture=True).stdout
             assert auth[name] not in output, "Credentials must not be printed into captured logs"

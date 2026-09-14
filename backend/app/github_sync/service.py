@@ -91,6 +91,7 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
     # Shared asset/risk rules remain the same for uploads and synced alerts.
     # Deferred import avoids a router -> service -> application import cycle.
     from ..main import _get_or_create_asset, compute_risk_score
+    from ..remediation.service import refresh_finding
 
     now = _utcnow()
     with SessionLocal.begin() as db:
@@ -148,6 +149,8 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
                                            connection.project], separators=(",", ":"))
                     finding = Finding(fingerprint=hashlib.sha256(identity.encode()).hexdigest(),
                                       status=STATE_TO_STATUS[alert.state], first_seen=now, occurrences=1, **values)
+                    if finding.status in {"resolved", "closed"}:
+                        finding.resolved_at = now
                     db.add(finding)
                     db.flush()
                     link = GitHubAlert(connection_id=connection.id, source=alert.source, number=alert.number,
@@ -164,11 +167,13 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
                     if link.source_state != alert.state:
                         old_status = finding.status
                         finding.status = STATE_TO_STATUS[alert.state]
+                        finding.resolved_at = now if finding.status in {"resolved", "closed"} else None
                         reopened = finding.status == "open" and old_status in {"closed", "resolved"}
                         db.add(Comment(finding_id=finding.id, author="GitHub sync", action_type="status_change",
                                        content=f"GitHub alert changed from {link.source_state} to {alert.state}; "
                                                f"status changed from {old_status} to {finding.status}"))
                     link.source_state, link.content_hash = alert.state, digest
+                refresh_finding(db, finding, now=now)
                 if finding.status == "open" and (is_new or reopened):
                     enqueue_finding(db, finding, event_id=signal.id, is_new=is_new)
             import_run.new_findings = run.new_findings = new_count

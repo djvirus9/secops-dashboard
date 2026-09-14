@@ -40,6 +40,10 @@ def main() -> None:
     assert request("/api/auth/me")[1]["user"]["role"] == "admin"
     status, sync = request("/api/github-sync")
     assert status == 200 and sync["configured"] is False and sync["count"] == 0
+    status, intelligence = request("/api/intelligence/status")
+    assert status == 200
+    assert {source["source"] for source in intelligence["sources"]} == {"cisa_kev", "first_epss"}
+    assert all(source["last_synced_at"] is None for source in intelligence["sources"])
     status, connection = request("/api/github-sync", body={
         "repository": "synthetic-ci/no-network-requests", "project": "ci-smoke",
         "sources": ["code_scanning"], "interval_minutes": 60,
@@ -62,6 +66,9 @@ def main() -> None:
     assert len(findings["results"]) == 1
     finding = findings["results"][0]
     assert finding["title"] == payload["title"]
+    assert finding["priority_score"] == 20
+    assert finding["remediation_due_at"] is not None
+    assert finding["sla_status"] in {"on_track", "due_soon"}
     assert finding["occurrences"] == 1, "Rejected cross-origin request must not write data"
     status, scanner = request("/api/scanner-tokens", body={
         "name": "CI disposable scanner", "project": "ci-smoke", "expires_in_days": 1,
@@ -97,7 +104,7 @@ def main() -> None:
     assert request("/api/auth/logout", body={}, request_origin="https://untrusted.invalid")[0] == 403
     assert request("/api/auth/logout", body={})[0] == 200
     assert request("/api/auth/me")[0] == 401
-    print("Compose cookie authentication/logout, origins, scoped scanner-token revocation, idle sync configuration, ingestion/replay, comments and saved views passed")
+    print("Compose cookie authentication/logout, origins, scoped scanner-token revocation, idle GitHub/intelligence configuration, priority/SLA ingestion, replay, comments and saved views passed")
 
 
 if __name__ == "__main__":

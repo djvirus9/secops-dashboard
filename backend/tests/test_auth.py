@@ -67,6 +67,17 @@ def test_cors_preflight_does_not_require_api_credentials(client):
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 
+    settings = client.options(
+        "/remediation/policies",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert settings.status_code == 200
+    assert "PUT" in settings.headers["access-control-allow-methods"]
+
 
 def test_unauthenticated_import_is_rejected_before_body_processing(client, monkeypatch):
     monkeypatch.setenv("MAX_IMPORT_REQUEST_BYTES", "1")

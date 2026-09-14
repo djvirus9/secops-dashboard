@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import sqlalchemy as sa
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,30 +39,58 @@ def main():
         migrate("0004")
         sys.path.insert(0, str(ROOT / "backend"))
         from argon2 import PasswordHasher
-        from app.db import SessionLocal, engine
-        from app.models import Asset, Finding, Comment, User, UserSession, SavedView
+        from app.db import engine
         now = datetime.now(UTC).replace(tzinfo=None)
-        with SessionLocal.begin() as db:
-            user = User(username="upgrade-admin", password_hash=PasswordHasher().hash(password), role="admin")
-            asset = Asset(project="upgrade-project", key="upgrade.example.invalid")
-            db.add_all([user, asset])
-            db.flush()
-            finding = Finding(fingerprint="a" * 64, tool="semgrep", project="upgrade-project", title="Synthetic pre-upgrade finding",
-                              severity="high", asset=asset.key, asset_id=asset.id, signal_id="synthetic", occurrences=7,
-                              status="in_progress", assignee="existing-analyst")
-            db.add(finding)
-            db.flush()
-            db.add_all([Comment(finding_id=finding.id, author=user.username, content="Preserve historical triage"),
-                        SavedView(user_id=user.id, name="Existing private view", filters_json='{"project":"upgrade-project"}'),
-                        UserSession(user_id=user.id, token_hash=hashlib.sha256(old_cookie.encode()).hexdigest(),
-                                    created_at=now, last_seen_at=now, expires_at=now + timedelta(hours=1))])
-            finding_id = finding.id
+        legacy = sa.MetaData()
+        legacy.reflect(bind=engine)
+        user_id, asset_id, finding_id = "upgrade-user", "upgrade-asset", "upgrade-finding"
+        with engine.begin() as connection:
+            connection.execute(legacy.tables["users"].insert(), {
+                "id": user_id, "username": "upgrade-admin", "password_hash": PasswordHasher().hash(password),
+                "role": "admin", "projects_json": None, "active": True, "created_at": now, "updated_at": now,
+            })
+            connection.execute(legacy.tables["assets"].insert(), {
+                "id": asset_id, "project": "upgrade-project", "key": "upgrade.example.invalid",
+                "name": "", "environment": "unknown", "owner": "", "criticality": "medium",
+                "exposure": "internal", "created_at": now, "updated_at": now,
+            })
+            connection.execute(legacy.tables["findings"].insert(), {
+                "id": finding_id, "fingerprint": "a" * 64, "tool": "semgrep", "project": "upgrade-project",
+                "source_id": None, "component": None, "component_version": None,
+                "title": "Synthetic pre-upgrade finding", "severity": "high",
+                "asset": "upgrade.example.invalid", "asset_id": asset_id, "exposure": "internal",
+                "criticality": "medium", "status": "investigating", "assignee": "existing-analyst",
+                "risk_score": 70, "occurrences": 7, "description": None, "recommendation": None,
+                "cwe_id": None, "cve_id": None, "cvss_score": None, "file_path": None,
+                "line_number": None, "references_json": "[]", "tags_json": "[]",
+                "first_seen": now, "last_seen": now, "signal_id": "synthetic",
+            })
+            connection.execute(legacy.tables["comments"].insert(), {
+                "id": "upgrade-comment", "finding_id": finding_id, "author": "upgrade-admin",
+                "content": "Preserve historical triage", "action_type": None, "created_at": now,
+            })
+            connection.execute(legacy.tables["saved_views"].insert(), {
+                "id": "upgrade-view", "user_id": user_id, "name": "Existing private view",
+                "filters_json": '{"project":"upgrade-project"}', "created_at": now, "updated_at": now,
+            })
+            connection.execute(legacy.tables["user_sessions"].insert(), {
+                "id": "upgrade-session", "user_id": user_id,
+                "token_hash": hashlib.sha256(old_cookie.encode()).hexdigest(),
+                "created_at": now, "last_seen_at": now, "expires_at": now + timedelta(hours=1),
+                "revoked_at": None,
+            })
 
         tables = ("assets", "findings", "comments", "users", "user_sessions", "saved_views")
+        legacy_columns = {name: tuple(column.name for column in legacy.tables[name].columns) for name in tables}
 
         def snapshot():
             with sqlite3.connect(database) as db:
-                return {name: db.execute(f'SELECT * FROM "{name}" ORDER BY id').fetchall() for name in tables}
+                return {
+                    name: db.execute(
+                        f'SELECT {", ".join(legacy_columns[name])} FROM "{name}" ORDER BY id'
+                    ).fetchall()
+                    for name in tables
+                }
 
         before = snapshot()
         migrate("head")
@@ -75,18 +104,21 @@ def main():
             detail = client.get(f"/findings/{finding_id}")
             assert detail.status_code == 200
             value = detail.json()
-            assert value["status"] == "in_progress" and value["occurrences"] == 7
+            assert value["status"] == "investigating" and value["occurrences"] == 7
             assert len(value["comments"]) == 1
             assert client.get("/saved-views").json()["results"][0]["name"] == "Existing private view"
             assert client.get("/scanner-tokens").json()["count"] == 0
             assert client.get("/github-sync").json()["configured"] is False
+            intelligence = client.get("/intelligence/status").json()["sources"]
+            assert {row["source"] for row in intelligence} == {"cisa_kev", "first_epss"}
+            assert value["priority_score"] == 30 and value["remediation_due_at"] is not None
             client.cookies.clear()
             assert client.post("/auth/login", headers={"Origin": "http://localhost:5000"},
                                json={"username": "upgrade-admin", "password": bootstrap_password}).status_code == 401
             assert client.post("/auth/login", headers={"Origin": "http://localhost:5000"},
                                json={"username": "upgrade-admin", "password": password}).status_code == 200
         engine.dispose()
-    print("Synthetic 0.2 upgrade preserved findings, triage, comments, accounts, passwords, sessions and saved views")
+    print("Synthetic 0.2 upgrade preserved workflow data and added explainable priority, SLA and intelligence state")
 
 
 if __name__ == "__main__":

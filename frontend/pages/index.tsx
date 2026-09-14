@@ -13,12 +13,21 @@ type Summary = {
   critical_findings: number;
   assets: number;
   active_by_severity: Record<string, number>;
+  urgent_findings: number;
+  known_exploited_findings: number;
+  aging_buckets: Record<string, number>;
+  priority_buckets: Record<string, number>;
+  sla: { tracked: number; overdue: number; accepted: number; on_track: number; compliance_percent: number };
+  top_assets: { project: string; asset: string; active_findings: number; priority_sum: number; max_priority: number }[];
+  trend: { date: string; new: number; resolved: number }[];
+  generated_at: string;
 };
 type SubmitResult = {
   accepted: boolean;
   deduped: boolean;
   finding_id: string;
   risk_score: number;
+  priority_score: number;
   occurrences: number;
 };
 
@@ -62,15 +71,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">Vulnerability management dashboard — ingest, triage, and track findings across your stack.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[.18em] text-indigo-600 dark:text-indigo-400">Remediation command center</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">Security posture at a glance</h1>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Prioritize exploited risk, watch remediation deadlines, and measure whether the backlog is moving.</p>
+        </div>
+        {summary && <p className="text-xs text-gray-500 dark:text-gray-400">{summary.assets} assets · {summary.resolved_findings} resolved · updated {new Date(summary.generated_at).toLocaleTimeString()}</p>}
       </div>
 
       <ErrorNotice message={summaryError} retry={loadSummary} />
       <ErrorNotice message={healthErr} retry={reloadHealth} />
       {summaryLoading && <p role="status" className="text-sm">Loading summary…</p>}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <Card title="API Status">
           {health ? (
             <div className="space-y-2">
@@ -86,13 +99,57 @@ export default function Dashboard() {
             </div>
           )}
         </Card>
-        <MetricCard label="Active" value={summary?.active_findings} tone="text-orange-600 dark:text-orange-400" />
-        <MetricCard label="Critical" value={summary?.critical_findings} tone="text-red-600 dark:text-red-400" />
-        <MetricCard label="Resolved" value={summary?.resolved_findings} tone="text-green-600 dark:text-green-400" />
-        <MetricCard label="Assets" value={summary?.assets} tone="text-indigo-600 dark:text-indigo-400" />
+        <MetricCard label="Active backlog" value={summary?.active_findings} tone="text-gray-950 dark:text-white" />
+        <MetricCard label="Urgent priority" value={summary?.urgent_findings} tone="text-red-600 dark:text-red-400" />
+        <MetricCard label="Known exploited" value={summary?.known_exploited_findings} tone="text-orange-600 dark:text-orange-400" />
+        <MetricCard label="Overdue SLA" value={summary?.sla.overdue} tone="text-rose-700 dark:text-rose-300" />
+        <MetricCard label="SLA compliance" value={summary?.sla.compliance_percent} suffix="%" tone="text-emerald-700 dark:text-emerald-300" />
       </div>
 
-      <div className="flex flex-wrap gap-3 text-sm"><Link href="/findings" className="button-secondary">Triage findings</Link>{canWrite && <Link href="/integrations" className="button-secondary">Import scan results</Link>}</div>
+      {summary && <div className="grid gap-4 xl:grid-cols-[1.35fr_.65fr]">
+        <Card title="New vs resolved · last 14 days">
+          <TrendChart rows={summary.trend} />
+        </Card>
+        <Card title="Remediation SLA">
+          <div className="mb-4 flex items-end justify-between"><span className="text-4xl font-semibold text-gray-950 dark:text-white">{summary.sla.compliance_percent}%</span><span className="text-xs text-gray-500 dark:text-gray-400">non-accepted findings in SLA</span></div>
+          <HorizontalBars values={[
+            ["On track", summary.sla.on_track, "bg-emerald-500"],
+            ["Overdue", summary.sla.overdue, "bg-rose-500"],
+            ["Accepted", summary.sla.accepted, "bg-amber-500"],
+          ]} />
+          <Link href={{ pathname: "/findings", query: { sla: "overdue", sort: "priority_desc" } }} className="mt-4 inline-block text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400">Review overdue findings →</Link>
+        </Card>
+      </div>}
+
+      {summary && <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Priority distribution">
+          <HorizontalBars values={[
+            ["Urgent · 80–100", summary.priority_buckets.urgent, "bg-red-600"],
+            ["High · 60–79", summary.priority_buckets.high, "bg-orange-500"],
+            ["Elevated · 40–59", summary.priority_buckets.elevated, "bg-amber-400"],
+            ["Standard · below 40", summary.priority_buckets.standard, "bg-slate-400"],
+          ]} />
+        </Card>
+        <Card title="Backlog age">
+          <HorizontalBars values={[
+            ["0–7 days", summary.aging_buckets["0_7_days"], "bg-indigo-500"],
+            ["8–30 days", summary.aging_buckets["8_30_days"], "bg-blue-500"],
+            ["31–90 days", summary.aging_buckets["31_90_days"], "bg-amber-500"],
+            ["Over 90 days", summary.aging_buckets.over_90_days, "bg-rose-500"],
+          ]} />
+        </Card>
+        <Card title="Highest-priority assets">
+          {summary.top_assets.length === 0 ? <p className="text-sm text-gray-500 dark:text-gray-400">No active findings.</p> : <ol className="space-y-3">
+            {summary.top_assets.map((item, index) => <li key={`${item.project}:${item.asset}`} className="flex items-center gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-200">{index + 1}</span>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-gray-900 dark:text-white">{item.asset}</p><p className="truncate text-xs text-gray-500 dark:text-gray-400">{item.project || "Default project"} · {item.active_findings} active</p></div>
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">{item.max_priority}</span>
+            </li>)}
+          </ol>}
+        </Card>
+      </div>}
+
+      <div className="flex flex-wrap gap-3 text-sm"><Link href="/findings" className="button-secondary">Triage findings</Link><Link href="/remediation" className="button-secondary">Remediation intelligence</Link>{canWrite && <Link href="/integrations" className="button-secondary">Import scan results</Link>}</div>
       {canWrite && <details className="rounded-xl border p-4 dark:border-gray-700"><summary className="cursor-pointer font-medium">Send a manual signal</summary>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Card title="Manual signal">
@@ -178,12 +235,33 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function MetricCard({ label, value, tone }: { label: string; value?: number; tone: string }) {
+function MetricCard({ label, value, suffix = "", tone }: { label: string; value?: number; suffix?: string; tone: string }) {
   return (
     <Card title={label}>
-      <div className={`text-3xl font-bold ${tone}`}>{value ?? "—"}</div>
+      <div className={`text-3xl font-bold ${tone}`}>{value ?? "—"}{value !== undefined ? suffix : ""}</div>
     </Card>
   );
+}
+
+function HorizontalBars({ values }: { values: [string, number, string][] }) {
+  const max = Math.max(1, ...values.map(([, value]) => value));
+  return <div className="space-y-3">{values.map(([label, value, color]) => <div key={label}>
+    <div className="mb-1 flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>{label}</span><strong>{value}</strong></div>
+    <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(value ? 4 : 0, value / max * 100)}%` }} /></div>
+  </div>)}</div>;
+}
+
+function TrendChart({ rows }: { rows: { date: string; new: number; resolved: number }[] }) {
+  const max = Math.max(1, ...rows.flatMap(row => [row.new, row.resolved]));
+  return <div>
+    <div className="mb-4 flex gap-4 text-xs text-gray-600 dark:text-gray-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-indigo-500" />New</span><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Resolved</span></div>
+    <div className="flex h-40 items-end gap-1" aria-label="Fourteen-day new and resolved findings chart">
+      {rows.map((row, index) => <div key={row.date} className="flex h-full min-w-0 flex-1 flex-col justify-end" title={`${row.date}: ${row.new} new, ${row.resolved} resolved`}>
+        <div className="flex h-[8rem] items-end justify-center gap-px"><span className="w-2 rounded-t bg-indigo-500" style={{ height: `${row.new / max * 100}%` }} /><span className="w-2 rounded-t bg-emerald-500" style={{ height: `${row.resolved / max * 100}%` }} /></div>
+        {(index === 0 || index === rows.length - 1) && <span className="mt-2 truncate text-[.6rem] text-gray-500">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
+      </div>)}
+    </div>
+  </div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
