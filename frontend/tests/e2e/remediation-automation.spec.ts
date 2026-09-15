@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const backend = 'http://127.0.0.1:15101';
 const findingId = '00000001-1111-4111-8111-111111111111';
@@ -6,6 +6,172 @@ const teamId = '00000001-5555-4555-8555-555555555555';
 const analystId = '00000098-1111-4111-8111-111111111111';
 const reviewerId = '00000099-1111-4111-8111-111111111111';
 test.beforeEach(async ({ request }) => { await request.post(`${backend}/__test/reset`, { data: {} }); });
+
+function latch() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+/** Hold one actual rule response, independently of the eligible-assignee read. */
+async function holdNextRuleResponse(page: Page, project: string) {
+  const arrived = latch();
+  const released = latch();
+  let held = false;
+  await page.route('**/api/ownership/rules?*', async route => {
+    const request = route.request();
+    if (held || request.method() !== 'GET' || new URL(request.url()).searchParams.get('project') !== project) {
+      await route.continue();
+      return;
+    }
+    held = true;
+    const response = await route.fetch();
+    arrived.resolve();
+    await released.promise;
+    await route.fulfill({ response });
+  });
+  return { arrived: arrived.promise, release: released.resolve };
+}
+
+function waitForRuleSave(page: Page, project: string) {
+  return page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/ownership/rules' && url.searchParams.get('project') === project
+      && response.request().method() === 'PUT';
+  });
+}
+
+test('ownership fields wait for the selected rule even when eligible assignees load first', async ({ page, request }) => {
+  const held = await holdNextRuleResponse(page, 'payments');
+  try {
+    await page.goto('/catalog');
+    await page.getByLabel('Routing project').selectOption('payments');
+    await held.arrived;
+    const assignee = page.getByLabel('Default assignee');
+    const enabled = page.getByLabel('Enable ownership routing for this project');
+    const save = page.getByRole('button', { name: 'Save routing', exact: true });
+    // The options prove the independent assignee request has finished. A slow
+    // rule response must still prevent editing fields that it will hydrate.
+    await expect(assignee.locator('option[value="reviewer"]')).toHaveCount(1);
+    await expect(assignee).toBeDisabled();
+    await expect(enabled).toBeDisabled();
+    await expect(save).toBeDisabled();
+    held.release();
+    await expect(save).toBeEnabled();
+    await assignee.selectOption('reviewer');
+    await enabled.check();
+    const saved = waitForRuleSave(page, 'payments');
+    await save.click();
+    const response = await saved;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ enabled: true, default_assignee: 'reviewer' });
+    await expect(page.getByText('Ownership routing saved. Existing manual assignments are preserved.')).toBeVisible();
+    await expect(save).toBeEnabled();
+    await expect(assignee).toHaveValue('reviewer');
+    await expect(enabled).toBeChecked();
+    const state = await (await request.get(`${backend}/__test/state`)).json();
+    expect(state.v06.rules).toContainEqual(expect.objectContaining({ project: 'payments', enabled: true, default_assignee: 'reviewer' }));
+  } finally { held.release(); }
+});
+
+test('membership-triggered rule refresh preserves an unsaved ownership draft', async ({ page, request }) => {
+  await page.goto('/catalog');
+  await page.getByLabel('Manage team').selectOption(teamId);
+  await expect(page.getByRole('button', { name: 'Remove reviewer from team' })).toBeVisible();
+  await page.getByLabel('Routing project').selectOption('payments');
+  const assignee = page.getByLabel('Default assignee');
+  const enabled = page.getByLabel('Enable ownership routing for this project');
+  const save = page.getByRole('button', { name: 'Save routing', exact: true });
+  await expect(save).toBeEnabled();
+  await assignee.selectOption('reviewer');
+  await enabled.check();
+  const held = await holdNextRuleResponse(page, 'payments');
+  try {
+    await page.getByLabel('Add team member').selectOption(analystId);
+    await page.getByRole('button', { name: 'Add member', exact: true }).click();
+    await held.arrived;
+    await expect(page.getByText('Team member added. Project grants are unchanged.')).toBeVisible();
+    await expect(save).toBeDisabled();
+    await expect(assignee).toHaveValue('reviewer');
+    await expect(enabled).toBeChecked();
+    held.release();
+    await expect(save).toBeEnabled();
+    await expect(assignee).toHaveValue('reviewer');
+    await expect(enabled).toBeChecked();
+    const saved = waitForRuleSave(page, 'payments');
+    await save.click();
+    const response = await saved;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ enabled: true, default_assignee: 'reviewer' });
+    const state = await (await request.get(`${backend}/__test/state`)).json();
+    expect(state.v06.members[teamId]).toContain(analystId);
+    expect(state.v06.rules).toContainEqual(expect.objectContaining({ project: 'payments', enabled: true, default_assignee: 'reviewer' }));
+  } finally { held.release(); }
+});
+
+test('changing routing project hydrates its rule without carrying over another project draft', async ({ page }) => {
+  await page.goto('/catalog');
+  await page.getByLabel('Project key', { exact: true }).fill('identity');
+  await page.getByRole('combobox', { name: 'Owning team', exact: true }).selectOption(teamId);
+  await page.getByRole('button', { name: 'Create project profile', exact: true }).click();
+  await expect(page.getByText('Project profile created.', { exact: true })).toBeVisible();
+  await page.getByLabel('Routing project').selectOption('payments');
+  const assignee = page.getByLabel('Default assignee');
+  const enabled = page.getByLabel('Enable ownership routing for this project');
+  const save = page.getByRole('button', { name: 'Save routing', exact: true });
+  await expect(save).toBeEnabled();
+  await assignee.selectOption('reviewer');
+  await enabled.check();
+  const held = await holdNextRuleResponse(page, 'identity');
+  try {
+    await page.getByLabel('Routing project').selectOption('identity');
+    await held.arrived;
+    await expect(assignee.locator('option[value="reviewer"]')).toHaveCount(1);
+    await expect(assignee).toBeDisabled();
+    await expect(enabled).toBeDisabled();
+    await expect(save).toBeDisabled();
+    held.release();
+    await expect(save).toBeEnabled();
+    await expect(assignee).toHaveValue('');
+    await expect(enabled).not.toBeChecked();
+    const saved = waitForRuleSave(page, 'identity');
+    await save.click();
+    const response = await saved;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ enabled: false, default_assignee: null });
+  } finally { held.release(); }
+});
+
+test('ownership rule read failure blocks editing until a successful retry', async ({ page }) => {
+  let failNextRead = true;
+  await page.route('**/api/ownership/rules?*', async route => {
+    if (failNextRead && route.request().method() === 'GET') {
+      failNextRead = false;
+      await route.fulfill({ status: 503, json: { detail: 'Ownership rule temporarily unavailable' } });
+    } else await route.continue();
+  });
+  await page.goto('/catalog');
+  await page.getByLabel('Routing project').selectOption('payments');
+  const assignee = page.getByLabel('Default assignee');
+  const enabled = page.getByLabel('Enable ownership routing for this project');
+  const save = page.getByRole('button', { name: 'Save routing', exact: true });
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('Ownership rule temporarily unavailable');
+  await expect(assignee.locator('option[value="reviewer"]')).toHaveCount(1);
+  await expect(assignee).toBeDisabled();
+  await expect(enabled).toBeDisabled();
+  await expect(save).toBeDisabled();
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(save).toBeEnabled();
+  await expect(assignee).toHaveValue('');
+  await expect(enabled).not.toBeChecked();
+  await assignee.selectOption('reviewer');
+  await enabled.check();
+  const saved = waitForRuleSave(page, 'payments');
+  await save.click();
+  const response = await saved;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toEqual({ enabled: true, default_assignee: 'reviewer' });
+});
 
 test('team membership and opt-in ownership routing preserve the grant boundary', async ({ page, request }) => {
   await page.goto('/catalog');

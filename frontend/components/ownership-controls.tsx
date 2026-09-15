@@ -8,21 +8,35 @@ import { ErrorNotice } from "./feedback";
 
 type Team = { id: string; name: string; active: boolean };
 type Project = { name: string; team_id: string | null; active: boolean };
+type RuleDraft = { project: string; enabled: boolean; assignee: string; dirty: boolean };
 
 export function OwnershipControls({ teams, projects }: { teams: Team[]; projects: Project[] }) {
   const [teamId, setTeamId] = useState("");
   const [userId, setUserId] = useState("");
   const [project, setProject] = useState("");
-  const [enabled, setEnabled] = useState(false);
-  const [assignee, setAssignee] = useState("");
+  const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const [success, setSuccess] = useState("");
   const accounts = useApiResource<{ results: User[] }>("/users");
   const members = useApiResource<{ results: User[] }>(teamId ? `/ownership/teams/${teamId}/members` : "/users", undefined, Boolean(teamId));
-  const rules = useApiResource<{ results: OwnershipRule[] }>("/ownership/rules", project ? { project } : undefined);
+  const rules = useApiResource<{ results: OwnershipRule[] }>("/ownership/rules", { project }, Boolean(project));
   const rule = rules.data?.results.find(row => row.project === project);
-  useEffect(() => { setEnabled(rule?.enabled || false); setAssignee(rule?.default_assignee || ""); }, [project, rule]);
+  const ruleReady = Boolean(project && rule && !rules.loading && !rules.error && draft?.project === project);
+  const enabled = draft?.project === project ? draft.enabled : false;
+  const assignee = draft?.project === project ? draft.assignee : "";
+  useEffect(() => {
+    if (rules.loading || !rule) return;
+    // Hydrate the selected project before editing; membership refreshes must not
+    // replace an unsaved draft with the previously persisted rule.
+    setDraft(current => current?.project === project && current.dirty ? current : {
+      project, enabled: rule.enabled, assignee: rule.default_assignee || "", dirty: false,
+    });
+  }, [project, rule, rules.loading]);
+  function editRule(change: Partial<Pick<RuleDraft, "enabled" | "assignee">>) {
+    if (!ruleReady || busy) return;
+    setDraft(current => current?.project === project ? { ...current, ...change, dirty: true } : current);
+  }
   async function membership(id: string, remove = false) {
     if (!teamId) return;
     setBusy(true); setFailure(""); setSuccess("");
@@ -34,9 +48,12 @@ export function OwnershipControls({ teams, projects }: { teams: Team[]; projects
     finally { setBusy(false); }
   }
   async function saveRule(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setFailure(""); setSuccess("");
+    event.preventDefault();
+    if (!ruleReady || busy) return;
+    setBusy(true); setFailure(""); setSuccess("");
     try {
       await apiPut("/ownership/rules", { enabled, default_assignee: assignee || null }, { query: { project } });
+      setDraft(current => current?.project === project ? { ...current, dirty: false } : current);
       rules.reload(); setSuccess("Ownership routing saved. Existing manual assignments are preserved.");
     } catch (reason) { setFailure(reason instanceof Error ? reason.message : "Unable to save routing"); }
     finally { setBusy(false); }
@@ -57,14 +74,15 @@ export function OwnershipControls({ teams, projects }: { teams: Team[]; projects
       </div>
       <form className="min-w-0 space-y-3" onSubmit={saveRule}>
         <h3 className="font-medium">Project assignment rule</h3>
-        <label className="grid gap-1 text-sm">Routing project<select className="input" value={project} disabled={busy} required onChange={event => { setProject(event.target.value); setFailure(""); setSuccess(""); }}><option value="">Choose a managed project</option>{projects.map(row => <option key={row.name} value={row.name}>{row.name}{row.active ? "" : " · inactive"}</option>)}</select></label>
+        <label className="grid gap-1 text-sm">Routing project<select className="input" value={project} disabled={busy} required onChange={event => { setProject(event.target.value); setDraft(null); setFailure(""); setSuccess(""); }}><option value="">Choose a managed project</option>{projects.map(row => <option key={row.name} value={row.name}>{row.name}{row.active ? "" : " · inactive"}</option>)}</select></label>
         <ErrorNotice message={rules.error} retry={rules.reload} />
+        {project && rules.loading && <p role="status">Loading ownership rule…</p>}
         {project && <><p className="text-sm">Owning team: {rule?.team_name || teams.find(team => team.id === projects.find(row => row.name === project)?.team_id)?.name || "Unowned"}</p>
-          <AssigneeSelect label="Default assignee" projects={[project]} value={assignee} current={rule?.default_assignee} onChange={setAssignee} disabled={busy} />
-          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />Enable ownership routing for this project</label>
+          <AssigneeSelect label="Default assignee" projects={[project]} value={assignee} current={rule?.default_assignee} onChange={value => editRule({ assignee: value })} disabled={busy || !ruleReady} />
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={enabled} disabled={busy || !ruleReady} onChange={event => editRule({ enabled: event.target.checked })} />Enable ownership routing for this project</label>
           {rule?.warning && <p className="text-sm text-amber-800 dark:text-amber-300">{rule.warning}</p>}
           <p className="text-xs">If the default owner becomes ineligible, work remains visible in the unassigned queue. Routing does not overwrite a manual assignment.</p>
-          <button className="button-primary" disabled={busy || rules.loading || Boolean(rules.error)}>Save routing</button></>}
+          <button className="button-primary" disabled={busy || !ruleReady}>Save routing</button></>}
       </form>
     </div>
   </section>;
