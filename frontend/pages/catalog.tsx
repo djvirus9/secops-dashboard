@@ -3,6 +3,7 @@ import { apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useApiResource } from "../lib/use-api-resource";
 import { ErrorNotice } from "../components/feedback";
+import { OwnershipControls } from "../components/ownership-controls";
 
 type Team = { id: string; name: string; contact: string; active: boolean };
 type Project = {
@@ -102,6 +103,7 @@ export default function CatalogPage() {
         </div>}
       </section>
     </>}
+    {isAdmin && data && <OwnershipControls teams={data.teams} projects={data.projects} />}
     {isAdmin && <section className="grid gap-4 lg:grid-cols-2">
       <form className="space-y-3 rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800" onSubmit={addTeam}>
         <h2 className="text-lg font-semibold">Create team</h2>

@@ -19,6 +19,8 @@ if os.environ.get("DATABASE_URL") or os.environ.get("PGHOST"):
 
 from app.models import Base  # noqa: E402 — must be after path setup
 from app.github_sync import models as github_models  # noqa: E402,F401
+from app.jira_sync import models as jira_models  # noqa: E402,F401
+from app.automation import models as automation_models  # noqa: E402,F401
 target_metadata = Base.metadata
 
 

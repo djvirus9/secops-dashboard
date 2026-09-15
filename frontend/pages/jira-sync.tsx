@@ -1,0 +1,34 @@
+import Link from "next/link";
+import { useState, type FormEvent } from "react";
+import { apiPut } from "../lib/api";
+import { useApiResource } from "../lib/use-api-resource";
+import type { User } from "../lib/auth";
+import { safeJiraUrl, type JiraLink } from "../lib/jira";
+import { ErrorNotice, Pagination } from "../components/feedback";
+
+type Mapping = { user_id: string; username: string; jira_account_id: string; active: boolean };
+export default function JiraSyncPage() {
+  const [offset, setOffset] = useState(0);
+  const sync = useApiResource<{ enabled: boolean; configured: boolean; interval_minutes: number; count: number; results: JiraLink[] }>("/jira-sync", { offset, limit: 50 });
+  const mappings = useApiResource<{ results: Mapping[] }>("/jira-sync/mappings");
+  const users = useApiResource<{ results: User[] }>("/users");
+  const [form, setForm] = useState({ user_id: "", jira_account_id: "", active: true });
+  const [busy, setBusy] = useState(false); const [failure, setFailure] = useState(""); const [success, setSuccess] = useState("");
+  async function save(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setFailure(""); setSuccess("");
+    try { await apiPut(`/jira-sync/mappings/${form.user_id}`, { jira_account_id: form.jira_account_id, active: form.active }); mappings.reload(); setForm({ user_id: "", jira_account_id: "", active: true }); setSuccess("Jira account mapping saved."); }
+    catch (reason) { setFailure(reason instanceof Error ? reason.message : "Unable to save Jira account mapping"); }
+    finally { setBusy(false); }
+  }
+  return <div className="space-y-5">
+    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Jira synchronization</h1><p className="mt-2 text-sm">Review linked issue progress and explicitly map dashboard users to Jira accounts.</p></div><button className="button-secondary" disabled={busy || sync.loading || mappings.loading} onClick={() => { sync.reload(); mappings.reload(); }}>Refresh</button></header>
+    <ErrorNotice message={failure} />{success && <p role="status">{success}</p>}<ErrorNotice message={sync.error} retry={sync.reload} />
+    {sync.loading && <p role="status">Loading Jira synchronization…</p>}
+    {sync.data && <><div className="rounded-xl border bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-800">Access {sync.data.configured ? "configured" : "not configured"} · sync {sync.data.enabled ? "enabled" : "disabled"} · interval {sync.data.interval_minutes} minutes. Runtime configuration controls activation; saving a mapping does not enable synchronization.</div><section className="space-y-3"><h2 className="text-lg font-semibold">Linked issues ({sync.data.count})</h2>{!sync.data.results.length ? <p className="text-sm">No Jira links discovered from successful notification deliveries yet.</p> : <div className="overflow-x-auto rounded-xl border dark:border-gray-700"><table className="min-w-full text-sm"><caption className="sr-only">Jira issue synchronization states</caption><thead><tr>{["Issue", "Remote status", "Sync state", "Last successful sync", "Review"].map(label => <th key={label} scope="col" className="p-3 text-left">{label}</th>)}</tr></thead><tbody>{sync.data.results.map(link => { const url = safeJiraUrl(link.url); return <tr key={link.finding_id} className="border-t dark:border-gray-700"><td className="p-3">{url ? <a className="text-indigo-600 underline dark:text-indigo-400" href={url} target="_blank" rel="noopener noreferrer">{link.issue_key}</a> : link.issue_key}</td><td className="p-3">{link.remote_status || "Not read"}</td><td className="p-3">{link.status.replaceAll("_", " ")}{link.last_error && <p className="mt-1 max-w-sm break-words text-xs text-amber-800 dark:text-amber-300">{link.last_error}</p>}</td><td className="p-3">{link.last_synced_at ? new Date(link.last_synced_at).toLocaleString() : "Not yet"}</td><td className="p-3"><Link className="text-indigo-600 underline dark:text-indigo-400" href={`/findings/${link.finding_id}`}>Review finding</Link></td></tr>; })}</tbody></table></div>}<Pagination count={sync.data.count} offset={offset} limit={50} loading={sync.loading} onPage={setOffset} /></section></>}
+    <section className="space-y-4 rounded-xl border bg-white p-5 dark:border-gray-700 dark:bg-gray-800"><h2 className="text-lg font-semibold">Jira account mappings</h2><p className="text-sm">Use the stable Jira account ID, not an email address or display name. Mappings do not grant project access. Every external assignee change still needs a review on its finding.</p><ErrorNotice message={mappings.error} retry={mappings.reload} /><ErrorNotice message={users.error} retry={users.reload} />
+      {mappings.data && <ul className="space-y-2">{mappings.data.results.map(mapping => <li key={mapping.user_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 dark:border-gray-700"><div className="min-w-0 text-sm"><div className="font-medium">{mapping.username} · {mapping.active ? "active" : "inactive"}</div><div className="break-all text-xs">{mapping.jira_account_id}</div></div><button className="button-secondary" disabled={busy} onClick={() => setForm({ user_id: mapping.user_id, jira_account_id: mapping.jira_account_id, active: mapping.active })} aria-label={`Edit Jira mapping ${mapping.username}`}>Edit</button></li>)}</ul>}
+      <form className="grid gap-3 border-t pt-4 sm:grid-cols-2 dark:border-gray-700" onSubmit={save}><label className="grid gap-1 text-sm">Dashboard account<select className="input" required value={form.user_id} disabled={busy || users.loading} onChange={event => setForm({ ...form, user_id: event.target.value })}><option value="">Choose an account</option>{users.data?.results.filter(user => user.role !== "viewer" || user.id === form.user_id).map(user => <option key={user.id} value={user.id}>{user.username}{user.active === false ? " · inactive" : ""}</option>)}</select></label><label className="grid gap-1 text-sm">Jira account ID<input className="input" required maxLength={128} value={form.jira_account_id} disabled={busy} onChange={event => setForm({ ...form, jira_account_id: event.target.value })} autoComplete="off" /></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} disabled={busy} onChange={event => setForm({ ...form, active: event.target.checked })} />Mapping active</label><div><button className="button-primary" disabled={busy || !form.user_id}>Save Jira mapping</button></div></form>
+    </section>
+    <p className="rounded-xl border border-amber-300 p-4 text-sm dark:border-amber-800">Jira Done moves a finding into verification only on a real remote transition. Status or assignee pushes are one-field, explicitly confirmed actions. Review uncertain delivery outcomes before retrying.</p>
+  </div>;
+}

@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { cp } from 'node:fs/promises';
+import { handleV06 } from './v06-fixture.mjs';
 await cp('public', '.next/standalone/public', { recursive: true });
 await cp('.next/static', '.next/standalone/.next/static', { recursive: true });
 
@@ -68,6 +69,7 @@ const server = createServer(async (req, res) => {
   if (user.role !== 'admin' && url.pathname.endsWith('/risk-acceptance')) return send(res, 403, { detail: 'Administrator required' });
   if (user.role === 'viewer' && req.method !== 'GET' && !url.pathname.startsWith('/saved-views')) return send(res, 403, { detail: 'Read-only account' });
   state.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body, actor: user.username, hasAuthorization: Boolean(req.headers.authorization), hasApiKey: Boolean(req.headers['x-api-key']), hasSpoofedUser: Boolean(req.headers['x-secops-user']) });
+  if (handleV06({ req, res, url, body, user, users, state, send })) return;
   if (url.pathname === '/catalog') {
     const projects = user.projects === null ? state.projects : state.projects.filter(project => user.projects.includes(project.name));
     const teamIds = new Set(projects.map(project => project.team_id).filter(Boolean));

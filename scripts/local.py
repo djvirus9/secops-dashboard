@@ -86,6 +86,9 @@ def environment(port: int, api_port: int) -> dict[str, str]:
     env["GITHUB_SYNC_TOKEN"] = read_github_token()
     env["GITHUB_SYNC_POLL_SECONDS"] = "5"
     env["INTELLIGENCE_POLL_SECONDS"] = "5"
+    env["AUTOMATION_POLL_SECONDS"] = "5"
+    env["JIRA_SYNC_ENABLED"] = "false"
+    env["JIRA_SYNC_INTERVAL_MINUTES"] = "30"
     # Local demos cannot accidentally send real messages using ambient credentials.
     for key in ("SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY"):
         env[key] = ""
@@ -167,6 +170,9 @@ def service_environment(name: str, env: dict[str, str]) -> dict[str, str]:
         })
     elif name == "intelligence-worker":
         allowed.add("INTELLIGENCE_POLL_SECONDS")
+    elif name == "automation-worker":
+        allowed.update({"AUTOMATION_POLL_SECONDS", "JIRA_SYNC_ENABLED", "JIRA_SYNC_INTERVAL_MINUTES",
+                        "SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"})
     return {key: value for key, value in env.items() if key in allowed}
 
 
@@ -331,6 +337,7 @@ def serve(run_id: str, port: int, api_port: int) -> None:
                 ("worker", [str(PYTHON), "-m", "app.notifications.worker"], ROOT / "backend"),
                 ("github-worker", [str(PYTHON), "-m", "app.github_sync.worker"], ROOT / "backend"),
                 ("intelligence-worker", [str(PYTHON), "-m", "app.remediation.worker"], ROOT / "backend"),
+                ("automation-worker", [str(PYTHON), "-m", "app.automation.worker"], ROOT / "backend"),
                 ("frontend", [shutil.which("node"), str(ROOT / "frontend/.next/standalone/server.js")], ROOT / "frontend"),
             ]
             for name, command, directory in commands:

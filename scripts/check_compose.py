@@ -14,7 +14,7 @@ def config(filename):
 def main():
     source = config("infra/docker-compose.yml")
     images = config("infra/docker-compose.images.yml")
-    expected = {"postgres", "backend", "notification-worker", "github-worker", "intelligence-worker", "frontend"}
+    expected = {"postgres", "backend", "notification-worker", "github-worker", "intelligence-worker", "automation-worker", "frontend"}
     assert set(source["services"]) == set(images["services"]) == expected
     for name in expected:
         original = source["services"][name]
@@ -32,6 +32,11 @@ def main():
         if name == "intelligence-worker":
             assert set(env) == {"PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "INTELLIGENCE_POLL_SECONDS"}, \
                 "Intelligence worker received unrelated application or integration credentials"
+        if name == "automation-worker":
+            assert set(env) == {"PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE", "AUTOMATION_POLL_SECONDS",
+                                "JIRA_SYNC_ENABLED", "JIRA_SYNC_INTERVAL_MINUTES", "JIRA_BASE_URL", "JIRA_EMAIL",
+                                "JIRA_API_TOKEN", "SLACK_WEBHOOK_URL"}, \
+                "Automation worker received unrelated credentials"
         if name == "frontend":
             assert set(env) == {"BACKEND_URL", "DASHBOARD_ORIGINS"}, "Frontend runtime must not receive backend credentials"
     print("Source/image Compose parity, build isolation and service credential boundaries passed")

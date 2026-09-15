@@ -116,6 +116,10 @@ def test_scanner_cannot_manage_connections(client, auth_headers, ingest_headers)
 
 
 def test_complete_snapshot_has_stable_identity_and_preserves_local_triage(client, auth_headers, remote, monkeypatch):
+    assert client.post("/users", headers=auth_headers, json={
+        "username": "alice", "password": "synthetic-sync-owner-password-123",
+        "role": "analyst", "projects": ["repo-one"],
+    }).status_code == 201
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/synthetic/fixture/value")
     connection = create(client, auth_headers)
     assert service.process_one() is True

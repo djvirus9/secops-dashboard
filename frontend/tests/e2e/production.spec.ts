@@ -63,7 +63,7 @@ test('a failed finding save preserves the draft and allows a successful retry an
   await request.post(`${backend}/__test/reset`, { data: { failPatch: 1 } });
   await page.goto(`/findings/${findingId}`);
   await page.getByLabel('Status', { exact: true }).selectOption('investigating');
-  await page.getByLabel('Assignee', { exact: true }).fill('reviewer');
+  await page.getByLabel('Assignee', { exact: true }).selectOption('reviewer');
   await page.getByRole('button', { name: 'Update Finding' }).click();
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Temporary save failure');
   await expect(page.getByLabel('Assignee', { exact: true })).toHaveValue('reviewer');
@@ -200,7 +200,7 @@ test('structured false-positive decisions require evidence and remain visible', 
 
 test('mobile navigation and forms fit the viewport and retain accessible names', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const path of ['/', '/my-queue', '/coverage', '/catalog', '/audit', '/integrations', '/risks', '/scanner-tokens', '/github-sync', '/remediation', '/ai-security', `/findings/${findingId}`]) {
+  for (const path of ['/', '/my-queue', '/operations', '/coverage', '/catalog', '/audit', '/integrations', '/risks', '/scanner-tokens', '/github-sync', '/jira-sync', '/remediation', '/ai-security', `/findings/${findingId}`]) {
     await page.goto(path);
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
     const widths = await page.evaluate(() => ({

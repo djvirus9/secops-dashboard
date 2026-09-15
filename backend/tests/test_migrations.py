@@ -357,7 +357,7 @@ def test_identity_downgrade_refuses_persisted_data_before_schema_changes(migrati
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0011"
         assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
 
@@ -385,7 +385,7 @@ def test_operations_downgrade_refuses_catalog_or_coverage_data_before_schema_cha
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0011"
         assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
 
@@ -411,5 +411,5 @@ def test_operations_downgrade_refuses_structured_finding_state(migration_engine)
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0011"
         assert connection.execute(sa.text("SELECT status FROM findings")).scalar_one() == "false_positive"

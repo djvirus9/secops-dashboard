@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 — Unreleased
+
+- Add actual team membership, validated assignees, opt-in new-finding routing,
+  and personal/team/Needs owner queues without expanding project grants. Preserve
+  historical invalid assignees while making them actionable in Needs owner.
+- Add opt-in project SLA and required scanner/GitHub coverage alerts, durable
+  acknowledgements, periodic reminders, shared-channel Slack delivery and
+  cancellation of obsolete notification retries. Failed evaluations retain
+  existing alerts rather than declaring recovery from partial data.
+- Add Jira Cloud progress polling and explicitly approved, one-field status or
+  mapped-assignee pushes. First pull establishes a baseline; later Done
+  transitions request verification, never verified resolution. Conflicts are
+  retained for review; uncertain writes are not automatically replayed.
+- Add the automation worker to local, source-Compose and image deployments,
+  migrations `0009`–`0011`, readiness and credential-isolation checks, and
+  conservative read-only downgrade preflight before schema changes.
+- Extend authorization, race/lease, migration, worker, frontend and real-backend
+  browser regression coverage. No integration or project automation is enabled
+  by upgrade; Jira and Slack remain disabled in the local helper.
+
 ## 0.5.0 — 2026-09-16
 
 - Add a project and team catalog with ownership, escalation contact, business

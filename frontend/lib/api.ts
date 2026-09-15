@@ -39,12 +39,17 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/coverage", "/api/coverage"],
   ["/audit-events", "/api/audit-events"],
   ["/my-queue", "/api/my-queue"],
+  ...["/ownership/assignees", "/ownership/rules", "/ownership/queue", "/ownership/my-teams", "/automation", "/automation/alerts", "/automation/policies", "/automation/evaluate", "/jira-sync", "/jira-sync/mappings"].map((path): [string, string] => [path, `/api${path}`]),
   ...["/auth/login", "/auth/logout", "/auth/me", "/auth/password", "/users", "/saved-views", "/findings/bulk", "/findings/export.csv"].map((path): [string, string] => [path, `/api${path}`]),
 ]);
 const FINDING_PATH =
-  /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/(?:comments|risk-acceptance))?$/i;
+  /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/(?:comments|risk-acceptance|jira(?:\/(?:pull|push))?))?$/i;
 
 function toApiUrl(path: string): string {
+  const ownershipPath = /^\/ownership\/teams\/([0-9a-f-]{36})\/members(?:\/([0-9a-f-]{36}))?$/i.exec(path);
+  if (ownershipPath) return `/api/ownership/teams/${ownershipPath[1]}/members${ownershipPath[2] ? `/${ownershipPath[2]}` : ""}`;
+  if (/^\/jira-sync\/mappings\/[0-9a-f-]{36}$/i.test(path)) return `/api${path}`;
+  if (/^\/automation\/alerts\/[0-9a-f-]{36}\/acknowledge$/i.test(path)) return `/api${path}`;
   const operationalPath = /^\/(coverage|catalog\/teams)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(path);
   if (operationalPath) return `/api/${operationalPath[1]}/${encodeURIComponent(operationalPath[2])}`;
   if (path.startsWith("/catalog/projects/")) {
@@ -95,8 +100,10 @@ export async function apiGet<T>(path: string, options: { query?: ApiQuery; signa
   return res.json();
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(toApiUrl(path), {
+export async function apiPost<T>(path: string, body: unknown, options: { query?: ApiQuery } = {}): Promise<T> {
+  const query = new URLSearchParams();
+  Object.entries(options.query || {}).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)); });
+  const res = await fetch(toApiUrl(path) + (query.size ? `?${query}` : ""), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -115,8 +122,10 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(toApiUrl(path), {
+export async function apiPut<T>(path: string, body: unknown, options: { query?: ApiQuery } = {}): Promise<T> {
+  const query = new URLSearchParams();
+  Object.entries(options.query || {}).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)); });
+  const res = await fetch(toApiUrl(path) + (query.size ? `?${query}` : ""), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

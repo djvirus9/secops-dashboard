@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { verifyAutomation } from './automation-flow';
+import { verifyRemediationOwnership } from './remediation-flow';
 
 const fixtures = Array.from({ length: 121 }, (_, index) => ({
   title: `Browser finding ${String(index + 1).padStart(3, '0')}`,
@@ -129,7 +130,7 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
     await analyst.getByRole('checkbox', { name: 'Select Browser finding 001', exact: true }).check();
     await analyst.getByLabel('Bulk status', { exact: true }).selectOption('investigating');
     await analyst.getByLabel('Assignment action').selectOption('assign');
-    await analyst.getByLabel('Bulk assignee').fill('scoped-analyst');
+    await analyst.getByLabel('Bulk assignee').selectOption('scoped-analyst');
     await analyst.getByRole('button', { name: 'Apply to 1 selected' }).click();
     await expect(analyst.getByText('Updated 1 selected findings.', { exact: true })).toBeVisible();
     expect(await (await request.get(`/api/findings/${visibleId}`)).json()).toMatchObject({ status: 'investigating', assignee: 'scoped-analyst' });
@@ -162,6 +163,7 @@ test('migrated backend supports import, triage, rediscovery, asset risk updates 
     await expect(analyst.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
     expect((await analyst.request.get('/api/auth/me')).status()).toBe(401);
   } finally { await viewerContext.close(); await analystContext.close(); }
+  await verifyRemediationOwnership(page);
   await verifyAutomation(page);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();

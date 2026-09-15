@@ -1,4 +1,4 @@
-# Threat model: version 0.5
+# Threat model: version 0.6
 
 This model describes the repository's self-hosted architecture and its automated
 checks. It does not attest to a particular running server, cloud account, or
@@ -12,7 +12,8 @@ Protected assets include findings and scanner evidence, project membership,
 password hashes and sessions, saved views, audit history, API/integration secrets,
 remediation policies, deadlines, risk acceptances, cached vulnerability intelligence,
 project/team ownership, coverage expectations and evidence, finding dispositions,
-database backups, and service availability. Treat imported scanner text as
+team membership/routing, operational alert state, Jira identity maps and queued
+write approvals, database backups, and service availability. Treat imported scanner text as
 untrusted even when the scanner has a valid ingestion key.
 
 | Actor | Authority |
@@ -25,6 +26,7 @@ untrusted even when the scanner has a valid ingestion key.
 | Scanner job | One-project ingestion with a revocable scanner token; legacy `INGEST_API_KEY` remains global for ingestion; neither allows reads or account administration |
 | GitHub sync administrator / worker | Administrator selects repository/project mappings; trusted worker reads fixed GitHub Cloud alert endpoints with one server token |
 | Intelligence administrator / worker | Administrator controls opt-in schedules; trusted worker reads fixed public CISA/FIRST endpoints without a feed credential |
+| Automation administrator / worker | Administrator enables per-project alerts and server-side Jira polling; worker evaluates local health and processes scoped, explicitly approved Jira writes |
 | Host/database operator | Controls deployments, backups, and interactive account recovery; outside application ACL isolation |
 
 ```mermaid
@@ -40,6 +42,8 @@ flowchart LR
     github -->|Server token; fixed HTTPS endpoints| cloud[api.github.com: alert data]
     intel[Intelligence worker] --> db
     intel -->|Fixed HTTPS; CVE IDs only for EPSS| feeds[CISA KEV / FIRST EPSS]
+    automation[Automation worker] -->|Policies, alerts, leased Jira jobs| db
+    automation -->|Pinned Cloud tenant; server credentials| jira[Jira progress and approved writes]
     release[Tested main / publication workflow] -->|Attested image digests| host[Host deployment]
     operator[Host operator] -->|Backup, restore, recovery| db
 ```
@@ -57,6 +61,15 @@ Public vulnerability intelligence is also opt-in. Its worker has no external cre
 ignores ambient proxy configuration, rejects redirects and oversized or malformed
 documents, and preserves last-good data on failure. EPSS requests disclose only
 validated CVE identifiers already present in findings.
+
+Team membership does not alter project grants. Eligible-user checks and the
+account lifecycle lock protect manual assignment, routing and Jira ownership
+changes. Jira polling is server-opt-in and limited to issue links from successful
+deliveries to the pinned tenant. Incoming provider status is progress evidence,
+not verified remediation. Outbound writes need explicit project-authorized
+approval and a fresh local/remote snapshot. No network request holds a database
+lock. Operational alerts use the existing trusted-team Slack channel; its audience
+is an operator-controlled boundary, not the dashboard's project ACL.
 
 ## Prioritized abuse cases
 
@@ -76,6 +89,10 @@ of application audit history and infrastructure logs.
 | 1. Hide overdue work through unauthorized or indefinite risk acceptance | Medium / high / audit and finding history aid review | Administrator user session only, project-scoped lookup, required reason, maximum 365-day expiry, automatic expiry, no priority reduction, and durable audit/history entries; test API-key/role rejection, expiry bounds, revoke, and SLA restoration |
 | 1. Misclassify a real issue as a false positive or another project's duplicate | Medium / high / finding activity and audit aid review | Analyst write access within project grants, minimum evidence reason, same-project canonical target, individual rather than bulk disposition, and structured retained fields; test short reasons, self/cross-project targets, scoped reads, and later observations |
 | 1. Treat missing or clean scanner output as proof of remediation | Medium / high / stale coverage and run history are visible | Coverage derives health only from durable explicit runs; clean reports remain evidence but never close findings, missing GitHub results never imply a fix, and repeated observations fail pending verification; test healthy/stale/failing/missing states and reopen behavior |
+| 1. Grant cross-project access or hide work through a team/Jira owner change | Medium / high / assignment and mapping audit aid detection | Membership never grants access; active writer plus exact grants required, including after queued approval; invalid legacy owners remain actionable; test deactivation/demotion, grants, mapping revocation and atomic bulk assignment |
+| 1. Treat a forged/stale Jira completion as verified remediation or overwrite newer triage | Medium / high / conflicts visible in Jira Sync and audit | Pinned tenant, bounded authenticated polling, baseline-only first observation, actual transition checks, verification-pending handoff, terminal preservation, local/remote snapshots and fenced jobs; test unchanged Done after scan reopen, ABA edits, concurrent queue/claim, stale approvals and uncertain writes |
+| 2. Suppress an escalated alert with an old acknowledgement or imply recovery on partial evaluation | Medium / high / policy state and audit visible | Resource generation and row locks, separate acknowledgement/resolution semantics, bounded complete evaluation with rollback on failure; test overdue transition, recurrence, policy pause, stale delivery cancellation and database failure heartbeat |
+| 2. Leak project data or flood a channel through operational alerts | Medium / medium–high / delivery queue and channel review | Admin-only opt-in per project, existing trusted-channel boundary, plain-text owner/contact labels, per-condition deduplication and reminder interval, current-state check before delivery; test payload rendering/cancellation and scoped inbox; operator must review channel membership and enable large backlogs gradually |
 | 2. Duplicate alerts, overwrite another project's identity, or infer a false resolution after a partial sync | Medium / high / run history and source-state evidence aid review | Immutable repository/project/source mappings, stable source alert identity, transactional claims and cancellation, unchanged-replay deduplication, no resolution inferred from absence; test replay, source changes, interruption, pagination failure and competing workers |
 | 2. Deploy an untested or replaced image through a moving tag | Medium / high / attestations and digest inspection support detection | Exact tested-main gate, native smoke on both staged architectures, publish-once version tags, SBOM/provenance and deployed digest references; unit-test failed/missing CI, stale HEAD and tag replacement; operators verify package visibility/provenance and retain verified backups |
 | 2. Exhaust resources with login attempts, giant reports, repeated exports, or many saved views | Medium / medium–high / request failures and resource use are observable | Global/account login throttles, request/parser/import limits, import deadline, 100 saved views per user, 200 bulk IDs, 10,000-row/16-MiB CSV caps; test boundaries and rejected transactions; operator owns upstream rate limits and capacity monitoring |

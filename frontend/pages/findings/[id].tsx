@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api";
 import { ErrorNotice } from "../../components/feedback";
+import { AssigneeSelect } from "../../components/assignee-select";
+import { JiraProgressPanel } from "../../components/jira-progress";
 
 type Comment = {
   id: string;
@@ -367,6 +369,8 @@ export default function FindingDetailPage() {
         )}
       </div>
 
+      <JiraProgressPanel findingId={finding.id} status={finding.status} assignee={finding.assignee} />
+
       {canWrite && <div className="bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-xs p-6 space-y-4">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Triage Actions</h2>
 
@@ -385,19 +389,7 @@ export default function FindingDetailPage() {
               ))}
             </select>
           </div>
-          <div>
-            <label htmlFor="finding-assignee" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assignee</label>
-            <input
-              type="text"
-              id="finding-assignee"
-              maxLength={255}
-              disabled={saving}
-              value={newAssignee}
-              onChange={(e) => setNewAssignee(e.target.value)}
-              placeholder="e.g., john@company.com"
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            />
-          </div>
+          <AssigneeSelect projects={[finding.project || ""]} value={newAssignee} current={finding.assignee} onChange={setNewAssignee} disabled={saving} />
         </div>
 
         {["false_positive", "duplicate"].includes(newStatus) && <div className="grid gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30 md:grid-cols-2"><label className="grid gap-1 text-sm">Decision reason<textarea className="input min-h-24" minLength={20} maxLength={2000} required value={dispositionReason} onChange={event => setDispositionReason(event.target.value)} placeholder="Explain the validation evidence and why this disposition is correct (minimum 20 characters)." /></label>{newStatus === "duplicate" && <label className="grid content-start gap-1 text-sm">Canonical finding ID<input className="input" required pattern="[0-9a-fA-F-]{36}" value={duplicateOfId} onChange={event => setDuplicateOfId(event.target.value)} placeholder="UUID of the original finding" /></label>}</div>}

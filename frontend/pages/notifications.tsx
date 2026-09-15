@@ -6,7 +6,7 @@ import { ErrorNotice, Pagination } from "../components/feedback";
 
 type Delivery = {
   id: string; finding_id: string | null; channel: string;
-  status: "pending" | "processing" | "sent" | "failed" | "needs_review";
+  status: "pending" | "processing" | "sent" | "failed" | "needs_review" | "cancelled";
   attempts: number; last_error: string | null; external_id: string | null; external_url: string | null;
   created_at: string; updated_at: string; next_attempt_at: string | null;
 };
@@ -47,6 +47,7 @@ export default function NotificationsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold capitalize">{delivery.channel} · {delivery.status.replaceAll("_", " ")}</h2><span className="text-sm">{delivery.attempts} attempt(s)</span></div>
           <p className="text-xs text-gray-600 dark:text-gray-400">Updated {new Date(delivery.updated_at).toLocaleString()}{delivery.next_attempt_at && delivery.status === "pending" ? ` · Next attempt ${new Date(delivery.next_attempt_at).toLocaleString()}` : ""}</p>
           {delivery.last_error && <p className="break-words text-sm">{delivery.last_error}</p>}
+          {delivery.status === "cancelled" && <p className="text-sm">This operational reminder is no longer actionable. It will not be retried.</p>}
           <div className="flex flex-wrap gap-3 text-sm">
             {delivery.finding_id && <Link href={`/findings/${delivery.finding_id}`} className="text-indigo-600 underline dark:text-indigo-400">View finding</Link>}
             {href && <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline dark:text-indigo-400">{delivery.external_id || "View external issue"}</a>}

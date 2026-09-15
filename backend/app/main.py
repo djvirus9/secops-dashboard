@@ -39,6 +39,12 @@ from .models import (
 from .notifications.outbox import enqueue, enqueue_finding, serialize_delivery
 from .operations import router as operations_router
 from .operational import router as operational_router
+from .ownership import router as ownership_router
+from .automation.routes import router as automation_router
+from .automation.models import AutomationPolicy, OperationalAlert
+from .jira_sync.routes import router as jira_sync_router
+from .jira_sync.models import JiraIssueLink, JiraUserMapping, JiraSyncControl
+from .models import TeamMembership, OwnershipRule
 from .workflows import router as workflows_router
 from .scanner_tokens import router as scanner_tokens_router
 from .github_sync.routes import router as github_sync_router
@@ -72,7 +78,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SecOps Dashboard API", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="SecOps Dashboard API", version="0.6.0", lifespan=lifespan)
 app.include_router(operations_router)
 app.include_router(accounts_router)
 app.include_router(workflows_router)
@@ -80,6 +86,9 @@ app.include_router(scanner_tokens_router)
 app.include_router(github_sync_router)
 app.include_router(remediation_router)
 app.include_router(operational_router)
+app.include_router(ownership_router)
+app.include_router(automation_router)
+app.include_router(jira_sync_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -209,6 +218,8 @@ def _json_list(value: Optional[str]) -> list:
 
 
 def _serialize_finding(f: Finding) -> dict:
+    from .ownership import finding_ownership
+
     now = utcnow()
     acceptance_status = (
         "active" if f.risk_accepted_until and f.risk_accepted_until > now
@@ -237,6 +248,7 @@ def _serialize_finding(f: Finding) -> dict:
         "criticality": f.criticality,
         "status": f.status,
         "assignee": f.assignee,
+        "ownership": finding_ownership(f),
         "risk_score": f.risk_score,
         "priority_score": f.priority_score,
         "priority_reasons": _json_list(f.priority_reasons_json),
@@ -514,6 +526,13 @@ def ready():
         db.execute(select(Team.id).limit(1))
         db.execute(select(ProjectProfile.name).limit(1))
         db.execute(select(CoverageExpectation.id).limit(1))
+        db.execute(select(TeamMembership.team_id).limit(1))
+        db.execute(select(OwnershipRule.project).limit(1))
+        db.execute(select(AutomationPolicy.project).limit(1))
+        db.execute(select(OperationalAlert.id).limit(1))
+        db.execute(select(JiraIssueLink.finding_id).limit(1))
+        db.execute(select(JiraUserMapping.user_id).limit(1))
+        db.execute(select(JiraSyncControl.id).limit(1))
         return {"status": "ready"}
     except Exception as exc:
         logger.error("Database readiness check failed (%s)", type(exc).__name__)
@@ -729,9 +748,13 @@ def upsert_asset(payload: AssetUpsert, request: Request):
 # -----------------------------
 @app.post("/ingest/signal")
 def ingest_signal(payload: SignalIn, request: Request):
+    from .accounts import _lock_accounts
+    from .ownership import route_new_finding
+
     require_write(request)
     require_project(request, payload.project)
     with SessionLocal.begin() as db:
+        _lock_accounts(db)
         now = utcnow()
         asset_key = (payload.asset or "unknown").strip()
         if not payload.project:
@@ -761,6 +784,8 @@ def ingest_signal(payload: SignalIn, request: Request):
         })
         if resurfaced:
             finding.resolved_at = None
+        if is_new:
+            route_new_finding(db, finding)
         refresh_finding(db, finding, now=now)
         if resurfaced:
             db.add(Comment(finding_id=finding.id, author="system",
@@ -852,12 +877,18 @@ class FindingUpdate(StrictModel):
 
 @app.patch("/findings/{finding_id}")
 def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
+    from .accounts import _lock_accounts
+    from .ownership import validate_assignee
+
     actor = require_write(request)
     db: Session = SessionLocal()
     try:
-        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project))).scalar_one_or_none()
+        _lock_accounts(db)
+        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project)).with_for_update()).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
+
+        assignee = validate_assignee(db, payload.assignee, [finding.project]) if "assignee" in payload.model_fields_set else finding.assignee
 
         now = utcnow()
         changes = []
@@ -900,10 +931,10 @@ def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
             if payload.reason:
                 changes.append(f"Reason: {payload.reason.strip()}")
 
-        if payload.assignee is not None and payload.assignee != finding.assignee:
+        if "assignee" in payload.model_fields_set and assignee != finding.assignee:
             old_assignee = finding.assignee or "unassigned"
-            finding.assignee = payload.assignee if payload.assignee else None
-            new_assignee = payload.assignee or "unassigned"
+            finding.assignee = assignee
+            new_assignee = assignee or "unassigned"
             changes.append(f"Assignee changed from '{old_assignee}' to '{new_assignee}'")
 
         if changes:
@@ -1192,6 +1223,9 @@ class ScanImportRequest(StrictModel):
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, request: Request):
+    from .accounts import _lock_accounts
+    from .ownership import route_new_finding
+
     require_write(request)
     started_at = utcnow()
     timeout = positive_int_setting("IMPORT_TIMEOUT_SECONDS", 900)
@@ -1221,6 +1255,7 @@ def import_scan(payload: ScanImportRequest, request: Request):
         if len(parsed_findings) > max_findings:
             raise HTTPException(status_code=413, detail=f"Parsed scan exceeds the {max_findings}-finding limit")
         with SessionLocal.begin() as db:
+            _lock_accounts(db)
             now = utcnow()
             new_findings = deduplicated = 0
             observed = {}
@@ -1272,6 +1307,8 @@ def import_scan(payload: ScanImportRequest, request: Request):
                 })
                 if resurfaced:
                     finding.resolved_at = None
+                if is_new:
+                    route_new_finding(db, finding)
                 refresh_finding(db, finding, now=now)
                 if resurfaced:
                     db.add(Comment(finding_id=finding.id, author="system",

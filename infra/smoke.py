@@ -16,14 +16,14 @@ def main() -> None:
     browser = build_opener(ProxyHandler({}), HTTPCookieProcessor(cookies))
     anonymous = build_opener(ProxyHandler({}))
 
-    def request(path, *, body=None, authenticated=True, request_origin=origin, api_key=None):
+    def request(path, *, body=None, method=None, authenticated=True, request_origin=origin, api_key=None):
         headers = {}
         if api_key:
             headers["X-API-Key"] = api_key
         if body is not None:
             headers.update({"Content-Type": "application/json", "Origin": request_origin})
         req = Request(("http://127.0.0.1:8000" if api_key else origin) + path, headers=headers,
-                      data=json.dumps(body).encode() if body is not None else None)
+                      data=json.dumps(body).encode() if body is not None else None, method=method)
         try:
             opener = browser if authenticated and not api_key else anonymous
             with opener.open(req, timeout=20) as response:
@@ -37,7 +37,12 @@ def main() -> None:
     session = next(cookie for cookie in cookies if cookie.name == "secops_session")
     assert session.has_nonstandard_attr("HttpOnly")
     assert session.get_nonstandard_attr("SameSite").lower() == "strict"
-    assert request("/api/auth/me")[1]["user"]["role"] == "admin"
+    user = request("/api/auth/me")[1]["user"]
+    assert user["role"] == "admin"
+    status, jira = request("/api/jira-sync")
+    assert status == 200 and jira["configured"] is False and jira["enabled"] is False and jira["count"] == 0
+    status, automation = request("/api/automation")
+    assert status == 200 and automation["slack_configured"] is False and not automation["policies"]
     status, sync = request("/api/github-sync")
     assert status == 200 and sync["configured"] is False and sync["count"] == 0
     status, intelligence = request("/api/intelligence/status")
@@ -53,6 +58,28 @@ def main() -> None:
     assert request("/api/github-sync")[1]["count"] == 1
     status, initial = request("/api/findings?project=ci-smoke")
     assert status == 200 and initial["count"] == 0, "Smoke tests require a fresh disposable database"
+    status, team = request("/api/catalog/teams", body={"name": "CI smoke owners", "contact": "ci@example.invalid"})
+    assert status == 201
+    team_id = team["team"]["id"]
+    assert request("/api/catalog/projects", body={
+        "name": "ci-smoke", "display_name": "CI smoke", "team_id": team_id,
+    })[0] == 201
+    assert request(f"/api/ownership/teams/{team_id}/members/{user['id']}", method="PUT", body={})[0] == 200
+    status, members = request(f"/api/ownership/teams/{team_id}/members")
+    assert status == 200 and [member["id"] for member in members["results"]] == [user["id"]]
+    status, rule = request("/api/ownership/rules?project=ci-smoke", method="PUT", body={
+        "enabled": True, "default_assignee": user["username"],
+    })
+    assert status == 200 and rule["enabled"] and rule["ready"]
+    assert request("/api/coverage", body={
+        "project": "ci-smoke", "source_type": "scanner", "source": "semgrep", "interval_hours": 24,
+    })[0] == 201
+    status, policy = request("/api/automation/policies?project=ci-smoke", method="PUT", body={
+        "enabled": False, "warn_before_hours": 24, "reminder_hours": 24, "notify_slack": False,
+    })
+    assert status == 200 and policy["policy"]["enabled"] is False and policy["policy"]["notify_slack"] is False
+    assert request("/api/automation/evaluate?project=ci-smoke", body={})[0] == 409
+    assert request("/api/automation/alerts?state=all&project=ci-smoke")[1]["count"] == 0
     payload = {
         "tool": "semgrep", "title": "CI synthetic finding", "severity": "medium",
         "asset": "ci-smoke.internal", "project": "ci-smoke",
@@ -66,6 +93,11 @@ def main() -> None:
     assert len(findings["results"]) == 1
     finding = findings["results"][0]
     assert finding["title"] == payload["title"]
+    assert finding["assignee"] == user["username"]
+    assert finding["ownership"] == {"status": "assigned", "team_id": team_id, "team_name": "CI smoke owners"}
+    status, queue = request(f"/api/ownership/queue?view=team&team_id={team_id}")
+    assert status == 200 and queue["count"] == 1 and queue["results"][0]["id"] == finding["id"]
+    assert request("/api/ownership/queue?view=unassigned&project=ci-smoke")[1]["count"] == 0
     assert finding["priority_score"] == 20
     assert finding["remediation_due_at"] is not None
     assert finding["sla_status"] in {"on_track", "due_soon"}
@@ -90,7 +122,8 @@ def main() -> None:
     comment = "CI synthetic restore verification"
     assert request(f"/api/findings/{finding['id']}/comments", body={"content": comment})[0] == 200
     status, detail = request(f"/api/findings/{finding['id']}")
-    assert status == 200 and len(detail["comments"]) == 1
+    assert status == 200 and len(detail["comments"]) == 2
+    assert sum(row["action_type"] == "ownership" for row in detail["comments"]) == 1, "Replay must not reroute ownership"
     assert detail["comments"][0]["content"] == comment
     assert detail["comments"][0]["author"] == os.environ["DASHBOARD_USERNAME"]
     status, saved_view = request("/api/saved-views", body={
@@ -104,7 +137,7 @@ def main() -> None:
     assert request("/api/auth/logout", body={}, request_origin="https://untrusted.invalid")[0] == 403
     assert request("/api/auth/logout", body={})[0] == 200
     assert request("/api/auth/me")[0] == 401
-    print("Compose cookie authentication/logout, origins, scoped scanner-token revocation, idle GitHub/intelligence configuration, priority/SLA ingestion, replay, comments and saved views passed")
+    print("Compose cookie authentication/logout, origins, scoped scanner-token revocation, idle GitHub/Jira/intelligence configuration, team ownership routing, disabled in-app automation, priority/SLA ingestion, replay, comments and saved views passed")
 
 
 if __name__ == "__main__":

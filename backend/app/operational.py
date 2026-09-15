@@ -13,6 +13,7 @@ from sqlalchemy import case, func, select, true
 from sqlalchemy.exc import IntegrityError
 
 from .access import audit_event, principal, project_filters, require_admin, require_project, require_user
+from .accounts import _lock_accounts
 from .db import SessionLocal
 from .github_sync.models import GitHubConnection, GitHubSyncRun
 from .models import (
@@ -189,6 +190,7 @@ def create_team(payload: TeamCreate, request: Request):
 def patch_team(team_id: UUID, payload: TeamPatch, request: Request):
     require_admin(request)
     with SessionLocal.begin() as db:
+        _lock_accounts(db)
         row = db.scalar(select(Team).where(Team.id == str(team_id)).with_for_update())
         if row is None:
             raise HTTPException(404, "Team not found")
@@ -231,6 +233,7 @@ def create_project(payload: ProjectCreate, request: Request):
 def patch_project(project_name: str, payload: ProjectPatch, request: Request):
     require_admin(request)
     with SessionLocal.begin() as db:
+        _lock_accounts(db)
         row = db.scalar(select(ProjectProfile).where(ProjectProfile.name == project_name).with_for_update())
         if row is None:
             raise HTTPException(404, "Project profile not found")
@@ -459,6 +462,8 @@ def audit_events(
 
 @router.get("/my-queue")
 def my_queue(request: Request, limit: int = 50, offset: int = 0):
+    from .ownership import valid_owner_clause
+
     identity = require_user(request)
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     filters = [
@@ -467,6 +472,7 @@ def my_queue(request: Request, limit: int = 50, offset: int = 0):
         Finding.status.in_(ACTIVE_FINDING_STATUSES),
     ]
     with SessionLocal() as db:
+        filters.append(valid_owner_clause(db))
         rows = db.scalars(select(Finding).where(*filters)
                           .order_by(
                               Finding.priority_score.desc(),

@@ -14,6 +14,7 @@ from ..accounts import _lock_accounts
 from ..db import SessionLocal
 from ..models import Comment, Finding, ImportRun, Signal, _utcnow
 from ..notifications.outbox import enqueue_finding
+from ..ownership import route_new_finding
 from .models import GitHubAlert, GitHubConnection, GitHubSyncRun
 from .routes import configured
 
@@ -156,6 +157,7 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
                         finding.resolved_at = now
                     db.add(finding)
                     db.flush()
+                    route_new_finding(db, finding, actor="GitHub sync")
                     link = GitHubAlert(connection_id=connection.id, source=alert.source, number=alert.number,
                                        finding_id=finding.id, source_state=alert.state, content_hash=digest,
                                        last_synced_at=now)

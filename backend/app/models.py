@@ -65,6 +65,24 @@ class ProjectProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class TeamMembership(Base):
+    __tablename__ = "team_memberships"
+
+    team_id: Mapped[str] = mapped_column(String, ForeignKey("teams.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class OwnershipRule(Base):
+    __tablename__ = "ownership_rules"
+
+    project: Mapped[str] = mapped_column(String(255), ForeignKey("projects.name"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_assignee: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class CoverageExpectation(Base):
     __tablename__ = "coverage_expectations"
     __table_args__ = (

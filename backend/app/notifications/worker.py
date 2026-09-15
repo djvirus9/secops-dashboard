@@ -66,6 +66,9 @@ def deliver(task: dict) -> dict:
     if task["channel"] not in configured_channels():
         return {"ok": False, "error": "Integration is not configured", "retryable": False}
     payload = json.loads(task["payload"])
+    if task["channel"] == "slack" and payload.get("event_type") == "operational_alert":
+        from ..automation.slack import send_alert
+        return send_alert(payload)
     common = {key: payload[key] for key in ("title", "severity", "asset", "risk_score", "finding_id", "tool")}
     if task["channel"] == "slack":
         return send_slack_notification_sync(**common, is_new=payload["is_new"], occurrences=payload["occurrences"])
@@ -87,7 +90,9 @@ def process_one() -> bool:
                   "unknown_outcome": task["channel"] == "jira"}
     now = utcnow()
     values = {"updated_at": now, "claim_token": None}
-    if result.get("ok"):
+    if result.get("cancelled"):
+        values.update(status="cancelled", last_error="Alert cleared, acknowledged, or notifications paused")
+    elif result.get("ok"):
         values.update(status="sent", last_error=None,
                       external_id=result.get("issue_key"), external_url=result.get("url"))
     elif result.get("unknown_outcome"):

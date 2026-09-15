@@ -129,8 +129,34 @@ jobs:
         run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T github-worker python -m app.github_sync.worker --health
       - name: Verify idle intelligence worker is healthy
         run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T intelligence-worker python -m app.remediation.worker --health
+      - name: Verify idle automation worker is healthy
+        run: docker compose -f "$SECOPS_COMPOSE_FILE" exec -T automation-worker python -m app.automation.worker --health
       - run: infra/backup.sh /tmp/secops-ci.dump
-      - run: SECOPS_EXPECTED_FINDINGS=1 SECOPS_EXPECTED_COMMENTS=1 SECOPS_EXPECTED_USERS=1 SECOPS_EXPECTED_SESSIONS=1 SECOPS_EXPECTED_SAVED_VIEWS=1 SECOPS_EXPECTED_SCANNER_TOKENS=1 SECOPS_EXPECTED_GITHUB_CONNECTIONS=1 SECOPS_EXPECTED_GITHUB_SYNC_RUNS=0 SECOPS_EXPECTED_GITHUB_ALERTS=0 SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE=0 SECOPS_EXPECTED_REMEDIATION_POLICIES=1 SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES=2 infra/verify-restore.sh /tmp/secops-ci.dump
+      - name: Verify restored workflow and automation records
+        env:
+          SECOPS_EXPECTED_FINDINGS: "1"
+          SECOPS_EXPECTED_COMMENTS: "2"
+          SECOPS_EXPECTED_USERS: "1"
+          SECOPS_EXPECTED_SESSIONS: "1"
+          SECOPS_EXPECTED_SAVED_VIEWS: "1"
+          SECOPS_EXPECTED_SCANNER_TOKENS: "1"
+          SECOPS_EXPECTED_GITHUB_CONNECTIONS: "1"
+          SECOPS_EXPECTED_GITHUB_SYNC_RUNS: "0"
+          SECOPS_EXPECTED_GITHUB_ALERTS: "0"
+          SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE: "0"
+          SECOPS_EXPECTED_REMEDIATION_POLICIES: "1"
+          SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES: "2"
+          SECOPS_EXPECTED_TEAMS: "1"
+          SECOPS_EXPECTED_PROJECTS: "1"
+          SECOPS_EXPECTED_COVERAGE_EXPECTATIONS: "1"
+          SECOPS_EXPECTED_TEAM_MEMBERSHIPS: "1"
+          SECOPS_EXPECTED_OWNERSHIP_RULES: "1"
+          SECOPS_EXPECTED_JIRA_ISSUE_LINKS: "0"
+          SECOPS_EXPECTED_JIRA_USER_MAPPINGS: "0"
+          SECOPS_EXPECTED_JIRA_SYNC_CONTROL: "0"
+          SECOPS_EXPECTED_AUTOMATION_POLICIES: "1"
+          SECOPS_EXPECTED_OPERATIONAL_ALERTS: "0"
+        run: infra/verify-restore.sh /tmp/secops-ci.dump
       - if: failure()
         run: docker compose -f "$SECOPS_COMPOSE_FILE" logs --no-color --tail 100
       - if: always()

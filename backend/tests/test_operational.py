@@ -4,7 +4,7 @@ from datetime import timedelta
 import pytest
 
 from app.db import SessionLocal
-from app.models import ImportRun
+from app.models import ImportRun, User
 from app.operational import utcnow
 
 
@@ -160,6 +160,10 @@ def test_coverage_reports_health_and_respects_project_scope(client, auth_headers
 
 
 def test_my_queue_requires_a_user_session_and_honors_assignments_and_scope(client, auth_headers):
+    # v0.6 requires real eligible assignees. Later grant removal must still
+    # hide formerly assigned private findings without erasing their history.
+    create_user(client, auth_headers, "alice", role="analyst", projects=["payments", "identity"])
+    create_user(client, auth_headers, "bob", role="analyst", projects=["payments"])
     mine = ingest(client, auth_headers, "My active item")
     closed = ingest(client, auth_headers, "My closed item")
     hidden = ingest(client, auth_headers, "Other project item", project="identity")
@@ -175,7 +179,9 @@ def test_my_queue_requires_a_user_session_and_honors_assignments_and_scope(clien
         assert response.status_code == 200, response.text
 
     assert client.get("/my-queue", headers=auth_headers).status_code == 403
-    create_user(client, auth_headers, "alice", projects=["payments"])
+    from sqlalchemy import select
+    with SessionLocal.begin() as db:
+        db.scalar(select(User).where(User.username == "alice")).projects_json = '["payments"]'
     login(client, "alice")
     queue = client.get("/my-queue").json()
     assert queue["count"] == 1
