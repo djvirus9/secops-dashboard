@@ -1,0 +1,52 @@
+import { expect, type Page } from '@playwright/test';
+
+/** Real routes and migrations; opt-in configuration stays in the disposable database. */
+export async function verifyRemediationOwnership(page: Page) {
+  const project = 'operations-browser-project';
+  const origin = 'http://127.0.0.1:15110';
+  await page.goto('/catalog');
+  await page.getByLabel('Team name', { exact: true }).fill('Remediation owners');
+  await page.getByLabel('Escalation contact', { exact: true }).fill('security@example.invalid');
+  await page.getByRole('button', { name: 'Create team', exact: true }).click();
+  await expect(page.getByText('Team created.', { exact: true })).toBeVisible();
+  const team = (await (await page.request.get('/api/catalog')).json()).teams.find((row: { name: string }) => row.name === 'Remediation owners');
+  await page.getByLabel('Project key', { exact: true }).fill(project);
+  await page.getByLabel('Display name', { exact: true }).fill('Operations browser verification');
+  await page.getByRole('combobox', { name: 'Owning team', exact: true }).selectOption(team.id);
+  await page.getByRole('button', { name: 'Create project profile', exact: true }).click();
+  await expect(page.getByText('Project profile created.', { exact: true })).toBeVisible();
+  const reviewer = (await (await page.request.get('/api/auth/me')).json()).user;
+  await page.getByLabel('Manage team').selectOption(team.id);
+  await page.getByLabel('Add team member').selectOption(reviewer.id);
+  await page.getByRole('button', { name: 'Add member', exact: true }).click();
+  await expect(page.getByText('Team member added. Project grants are unchanged.')).toBeVisible();
+  await page.getByLabel('Routing project').selectOption(project);
+  await page.getByLabel('Default assignee').selectOption('reviewer');
+  await expect(page.getByLabel('Default assignee').locator('option[value="scoped-viewer"]')).toHaveCount(0);
+  await expect(page.getByLabel('Default assignee').locator('option[value="scoped-analyst"]')).toHaveCount(0);
+  await page.getByLabel('Enable ownership routing for this project').check();
+  await page.getByRole('button', { name: 'Save routing', exact: true }).click();
+  await expect(page.getByText('Ownership routing saved. Existing manual assignments are preserved.')).toBeVisible();
+  const imported = await page.request.post('/api/import/scan', { headers: { Origin: origin }, data: { parser: 'generic-json', project, content: JSON.stringify([{ title: 'Routed browser finding', source_id: 'routing-regression', asset: 'workflow.example.invalid', severity: 'high' }]) } });
+  expect(imported.status()).toBe(200);
+  const finding = (await (await page.request.get(`/api/findings?project=${project}`)).json()).results[0];
+  expect(finding).toMatchObject({ assignee: 'reviewer', ownership: { status: 'assigned', team_name: 'Remediation owners' } });
+  await page.goto('/my-queue');
+  await expect(page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Routed browser finding', exact: true }) }).getByRole('cell', { name: 'reviewer', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Team work' }).click();
+  await page.getByLabel('Queue team').selectOption(team.id);
+  await expect(page.getByRole('link', { name: 'Routed browser finding', exact: true })).toBeVisible();
+  await page.goto('/operations');
+  await page.getByLabel('Policy project', { exact: true }).fill(project);
+  await page.getByLabel('Enable operations policy').check();
+  await expect(page.getByLabel('Send reminders to the configured Slack channel')).not.toBeChecked();
+  await page.getByRole('button', { name: 'Save operations policy' }).click();
+  await expect(page.getByText('Operations policy saved.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `Evaluate ${project}`, exact: true }).click();
+  await expect(page.getByText('Evaluation queued.', { exact: false })).toBeVisible();
+  const policy = (await (await page.request.get('/api/automation')).json()).policies.find((row: { project: string }) => row.project === project);
+  expect(policy).toMatchObject({ enabled: true, notify_slack: false });
+  await page.goto(`/findings/${finding.id}`);
+  await expect(page.getByText('Jira synchronization is disabled.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Discover linked Jira issue' })).toBeDisabled();
+}

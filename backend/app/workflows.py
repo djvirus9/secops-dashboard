@@ -6,7 +6,7 @@ import io
 import json
 import unicodedata
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -15,9 +15,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .access import audit_event, principal, project_filters, require_user, require_write
+from .accounts import _lock_accounts
 from .db import SessionLocal
-from .finding_query import FindingFilters, FindingStatus, finding_filters, finding_order
+from .finding_query import TERMINAL_FINDING_STATUSES, FindingFilters, finding_filters, finding_order
 from .models import Comment, Finding, SavedView, User
+from .ownership import validate_assignee
 
 router = APIRouter()
 MAX_SAVED_VIEWS = 100
@@ -131,7 +133,7 @@ def delete_view(view_id: UUID, request: Request):
 class BulkUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ids: list[UUID] = Field(min_length=1, max_length=200)
-    status: FindingStatus | None = None
+    status: Literal["open", "investigating", "verification_pending", "resolved", "closed"] | None = None
     assignee: str | None = Field(None, max_length=255)
 
     @model_validator(mode="after")
@@ -154,21 +156,40 @@ def bulk_update(payload: BulkUpdate, request: Request):
         raise HTTPException(403, "Scanner credentials cannot triage findings")
     ids = sorted(str(value) for value in payload.ids)
     with SessionLocal.begin() as db:
+        _lock_accounts(db)
         rows = db.scalars(select(Finding).where(Finding.id.in_(ids), *project_filters(request, Finding.project))
                           .order_by(Finding.id).with_for_update()).all()
         # Check the complete selection before modifying anything or revealing IDs.
         if len(rows) != len(ids):
             raise HTTPException(404, "One or more selected findings are unavailable; refresh your selection")
+        assignee = validate_assignee(db, payload.assignee, [row.project for row in rows]) if "assignee" in payload.model_fields_set else None
         changed = 0
         now = utcnow()
         for finding in rows:
             changes = []
             if payload.status is not None and payload.status != finding.status:
-                changes.append(f"Status changed from '{finding.status}' to '{payload.status}'")
+                old_status = finding.status
+                changes.append(f"Status changed from '{old_status}' to '{payload.status}'")
                 finding.status = payload.status
-                finding.resolved_at = now if payload.status in {"resolved", "closed"} else None
+                finding.resolved_at = now if payload.status in TERMINAL_FINDING_STATUSES else None
+                if payload.status == "verification_pending":
+                    finding.verification_requested_at = now
+                    finding.verified_at = None
+                    finding.verified_by = None
+                    finding.disposition_reason = None
+                    finding.duplicate_of_id = None
+                elif payload.status == "resolved" and old_status == "verification_pending":
+                    finding.verified_at = now
+                    finding.verified_by = actor.username
+                    finding.disposition_reason = None
+                    finding.duplicate_of_id = None
+                else:
+                    finding.verification_requested_at = None
+                    finding.verified_at = None
+                    finding.verified_by = None
+                    finding.disposition_reason = None
+                    finding.duplicate_of_id = None
             if "assignee" in payload.model_fields_set:
-                assignee = payload.assignee or None
                 if assignee != finding.assignee:
                     changes.append(f"Assignee changed from '{finding.assignee or 'unassigned'}' to '{assignee or 'unassigned'}'")
                     finding.assignee = assignee
@@ -184,7 +205,9 @@ def bulk_update(payload: BulkUpdate, request: Request):
 EXPORT_COLUMNS = ("id", "project", "tool", "title", "severity", "status", "assignee", "priority_score", "risk_score",
                   "asset", "component", "component_version", "cve_id", "cvss_score", "file_path",
                   "line_number", "kev", "epss_score", "epss_percentile", "remediation_due_at",
-                  "risk_accepted_until", "first_seen", "last_seen", "resolved_at", "occurrences")
+                  "risk_accepted_until", "disposition_reason", "duplicate_of_id",
+                  "verification_requested_at", "verified_at", "verified_by",
+                  "first_seen", "last_seen", "resolved_at", "occurrences")
 
 
 def csv_cell(value):

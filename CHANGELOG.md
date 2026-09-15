@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0 — Unreleased
+
+- Add actual team membership, validated assignees, opt-in new-finding routing,
+  and personal/team/Needs owner queues without expanding project grants. Preserve
+  historical invalid assignees while making them actionable in Needs owner.
+- Add opt-in project SLA and required scanner/GitHub coverage alerts, durable
+  acknowledgements, periodic reminders, shared-channel Slack delivery and
+  cancellation of obsolete notification retries. Failed evaluations retain
+  existing alerts rather than declaring recovery from partial data.
+- Add Jira Cloud progress polling and explicitly approved, one-field status or
+  mapped-assignee pushes. First pull establishes a baseline; later Done
+  transitions request verification, never verified resolution. Conflicts are
+  retained for review; uncertain writes are not automatically replayed.
+- Add the automation worker to local, source-Compose and image deployments,
+  migrations `0009`–`0011`, readiness and credential-isolation checks, and
+  conservative read-only downgrade preflight before schema changes.
+- Extend authorization, race/lease, migration, worker, frontend and real-backend
+  browser regression coverage. No integration or project automation is enabled
+  by upgrade; Jira and Slack remain disabled in the local helper.
+
+## 0.5.0 — 2026-09-16
+
+- Add a project and team catalog with ownership, escalation contact, business
+  tier, unit, and repository context while preserving existing project keys and
+  project grants. Signed-in users see only catalog entries in their scope;
+  administrators manage the inventory and see unmanaged observed keys.
+- Add explicit scanner and GitHub coverage expectations with healthy, stale,
+  failing, missing, and disabled states, required-control attention counts, last
+  success, scanner last-clean result, and next-due evidence. GitHub zero-alert
+  snapshots are not labeled clean, and absent results never infer a fix.
+- Add `verification_pending`, `false_positive`, and `duplicate` finding states.
+  Verification failures reopen findings on a repeated observation; verified
+  resolution records actor and time; false-positive and duplicate decisions
+  require evidence, and duplicate targets must be in the same project.
+- Add a project-scoped personal assignment queue and an administrator audit-log
+  viewer with bounded pagination and actor/action/object filters. Catalog,
+  coverage, workflow, and finding updates create structured audit events.
+- Add additive migration `0008`, downgrade refusal before lossy SQLite DDL,
+  readiness checks, API authorization/scoping regressions, and production browser
+  coverage for the new operational surfaces.
+
 ## 0.4.0 — 2026-09-15
 
 - Add opt-in CISA Known Exploited Vulnerabilities and FIRST EPSS enrichment

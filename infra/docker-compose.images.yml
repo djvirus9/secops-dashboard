@@ -33,6 +33,13 @@ services:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to a release image digest}
     pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
 
+  automation-worker:
+    extends:
+      file: compose.services.yml
+      service: automation-worker
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE must be set to a release image digest}
+    pull_policy: ${SECOPS_IMAGE_PULL_POLICY:-always}
+
   frontend:
     extends:
       file: compose.services.yml

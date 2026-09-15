@@ -17,11 +17,12 @@ if "pg_dump" in command:
 elif "to_regclass" in command:
     print("f" if os.environ.get("TEST_LEGACY") else "t")
 elif "SELECT (SELECT count(*) FROM findings)" in command:
-    print("1:1")
+    print("1:2")
 elif "SELECT count(*) FROM public." in command:
     table = re.search(r"SELECT count\(\*\) FROM public\.([a-z_]+)", command).group(1)
     print(2 if table == "intelligence_sync_states" else
-          0 if table in {"github_sync_runs", "github_alerts", "vulnerability_intelligence"} else 1)
+          0 if table in {"github_sync_runs", "github_alerts", "vulnerability_intelligence",
+                         "jira_issue_links", "jira_user_mappings", "jira_sync_control", "operational_alerts"} else 1)
 '''
 
 
@@ -50,27 +51,56 @@ class BackupRestoreTests(unittest.TestCase):
         self.assertEqual(self.run_script("backup.sh").returncode, 0)
         self.assertEqual(self.archive.read_text(), "synthetic-backup")
         self.assertEqual(self.archive.stat().st_mode & 0o777, 0o600)
-        result = self.run_script("verify-restore.sh", SECOPS_EXPECTED_FINDINGS="1", SECOPS_EXPECTED_COMMENTS="1",
+        result = self.run_script("verify-restore.sh", SECOPS_EXPECTED_FINDINGS="1", SECOPS_EXPECTED_COMMENTS="2",
                                  SECOPS_EXPECTED_SCANNER_TOKENS="1", SECOPS_EXPECTED_GITHUB_CONNECTIONS="1",
                                  SECOPS_EXPECTED_GITHUB_SYNC_RUNS="0", SECOPS_EXPECTED_GITHUB_ALERTS="0",
                                  SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE="0",
                                  SECOPS_EXPECTED_REMEDIATION_POLICIES="1",
-                                 SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES="2")
+                                 SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES="2",
+                                 SECOPS_EXPECTED_TEAMS="1", SECOPS_EXPECTED_PROJECTS="1",
+                                 SECOPS_EXPECTED_COVERAGE_EXPECTATIONS="1", SECOPS_EXPECTED_TEAM_MEMBERSHIPS="1",
+                                 SECOPS_EXPECTED_OWNERSHIP_RULES="1", SECOPS_EXPECTED_AUTOMATION_POLICIES="1",
+                                 SECOPS_EXPECTED_JIRA_ISSUE_LINKS="0", SECOPS_EXPECTED_JIRA_USER_MAPPINGS="0",
+                                 SECOPS_EXPECTED_JIRA_SYNC_CONTROL="0", SECOPS_EXPECTED_OPERATIONAL_ALERTS="0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.run_script("backup.sh").returncode, 1)
         for call in self.calls():
             self.assertEqual(call[call.index("-f") + 1], self.env["SECOPS_COMPOSE_FILE"])
             self.assertEqual(call[call.index("--env-file") + 1], self.env["SECOPS_ENV_FILE"])
         self.assertTrue(any("dropdb" in " ".join(call) for call in self.calls()))
+        self.assertIn("Restored team_memberships: 1 (table present: t)", result.stdout)
+        self.assertIn("Restored operational_alerts: 0 (table present: t)", result.stdout)
 
     def test_older_backup_missing_new_tables_restores_and_does_not_query_absent_rows(self):
         self.archive.write_text("synthetic old backup")
         result = self.run_script("verify-restore.sh", TEST_LEGACY="1", SECOPS_EXPECTED_SCANNER_TOKENS="0",
-                                 SECOPS_EXPECTED_GITHUB_CONNECTIONS="0")
+                                 SECOPS_EXPECTED_GITHUB_CONNECTIONS="0", SECOPS_EXPECTED_TEAMS="0",
+                                 SECOPS_EXPECTED_TEAM_MEMBERSHIPS="0", SECOPS_EXPECTED_AUTOMATION_POLICIES="0",
+                                 SECOPS_EXPECTED_JIRA_SYNC_CONTROL="0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("table present: f", result.stdout)
         self.assertFalse(any("SELECT count(*) FROM public." in " ".join(call) for call in self.calls()))
         self.assertTrue(any("dropdb" in " ".join(call) for call in self.calls()))
+
+    def test_operations_count_mismatch_still_cleans_up_only_temporary_restore_database(self):
+        self.archive.write_text("synthetic backup")
+        result = self.run_script("verify-restore.sh", SECOPS_EXPECTED_OWNERSHIP_RULES="2")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Restored ownership_rules count does not match", result.stderr)
+        deletes = [call for call in self.calls() if "dropdb" in " ".join(call)]
+        self.assertEqual(len(deletes), 1)
+        self.assertTrue(deletes[0][-1].startswith("secops_restore_check_"))
+
+    def test_invalid_operations_expected_counts_are_rejected_before_docker(self):
+        self.archive.write_text("synthetic backup")
+        for key in ("TEAMS", "PROJECTS", "COVERAGE_EXPECTATIONS", "TEAM_MEMBERSHIPS", "OWNERSHIP_RULES",
+                    "JIRA_ISSUE_LINKS", "JIRA_USER_MAPPINGS", "JIRA_SYNC_CONTROL", "AUTOMATION_POLICIES",
+                    "OPERATIONAL_ALERTS"):
+            with self.subTest(key=key):
+                result = self.run_script("verify-restore.sh", **{f"SECOPS_EXPECTED_{key}": "-1"})
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Expected restore row counts must be nonnegative integers", result.stderr)
+                self.assertFalse(self.log.exists())
 
     def test_failed_count_check_still_removes_only_temporary_restore_database(self):
         self.archive.write_text("synthetic backup")

@@ -6,7 +6,7 @@ export function readFilters(source: Record<string, unknown>): FindingFilters {
     if (typeof source[key] === "string") result[key] = (source[key] as string).slice(0, 500);
   }
   if (!["", "info", "low", "medium", "high", "critical"].includes(result.severity)) result.severity = "";
-  if (!["", "open", "investigating", "resolved", "closed"].includes(result.status)) result.status = "";
+  if (!["", "open", "investigating", "verification_pending", "resolved", "closed", "false_positive", "duplicate"].includes(result.status)) result.status = "";
   if (!["", "true", "false"].includes(result.kev)) result.kev = "";
   if (!["", "overdue", "due_soon", "accepted", "on_track"].includes(result.sla)) result.sla = "";
   if (!["priority_desc", "risk_desc", "last_seen_desc"].includes(result.sort)) result.sort = "priority_desc";

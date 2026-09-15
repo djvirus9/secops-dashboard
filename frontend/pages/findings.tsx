@@ -57,7 +57,7 @@ export default function FindingsPage() {
       <label className="grid gap-1 text-sm">Status
         <select aria-label="Status" className="input" value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
           <option value="">All statuses</option>
-          {["open", "investigating", "resolved", "closed"].map((value) => <option key={value}>{value}</option>)}
+          {["open", "investigating", "verification_pending", "resolved", "closed", "false_positive", "duplicate"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
         </select>
       </label>
       <label className="grid gap-1 text-sm">Sort
@@ -81,7 +81,7 @@ export default function FindingsPage() {
     <ErrorNotice message={error} retry={reload} />
     <ErrorNotice message={actionError} />
     {success && <p role="status">{success}</p>}
-    {canWrite && selected.length > 0 && <BulkFindings key={selected.join(",")} ids={selected} pending={setBusy} done={message => { setSuccess(message); setSelected([]); reload(); }} />}
+    {canWrite && selected.length > 0 && <BulkFindings key={selected.join(",")} ids={selected} projects={[...new Set(data?.results.filter(row => selected.includes(row.id)).map(row => row.project || "") || [])]} pending={setBusy} done={message => { setSuccess(message); setSelected([]); reload(); }} />}
     {loading && <p role="status">Loading findings…</p>}
     {data && <>
       {data.results.length === 0 ? <p className="rounded-xl border p-6 dark:border-gray-700">No findings match these filters.</p> :

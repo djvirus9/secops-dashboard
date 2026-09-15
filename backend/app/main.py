@@ -6,7 +6,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 from typing import Annotated, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from defusedxml.common import DefusedXmlException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -28,22 +28,37 @@ from .ai_security import (
     run_scenario as run_ai_security_scenario,
 )
 from .auth import api_key_middleware
-from .access import principal, project_filters, require_project, require_write, require_admin
+from .access import audit_event, principal, project_filters, require_project, require_write, require_admin
 from .accounts import bootstrap_admin, router as accounts_router
 from .db import SessionLocal
 from .limits import RequestBodyLimitMiddleware, positive_int_setting
 from .models import (
-    Asset, Comment, Finding, Signal, ImportRun, NotificationDelivery,
-    IntelligenceSyncState, RemediationPolicy, VulnerabilityIntelligence,
+    Asset, Comment, CoverageExpectation, Finding, Signal, ImportRun, NotificationDelivery,
+    IntelligenceSyncState, ProjectProfile, RemediationPolicy, Team, VulnerabilityIntelligence,
 )
 from .notifications.outbox import enqueue, enqueue_finding, serialize_delivery
 from .operations import router as operations_router
+from .operational import router as operational_router
+from .ownership import router as ownership_router
+from .automation.routes import router as automation_router
+from .automation.models import AutomationPolicy, OperationalAlert
+from .jira_sync.routes import router as jira_sync_router
+from .jira_sync.models import JiraIssueLink, JiraUserMapping, JiraSyncControl
+from .models import TeamMembership, OwnershipRule
 from .workflows import router as workflows_router
 from .scanner_tokens import router as scanner_tokens_router
 from .github_sync.routes import router as github_sync_router
 from .remediation.routes import router as remediation_router
 from .remediation.service import backfill_remediation, refresh_finding
-from .finding_query import FindingFilters, finding_filters, finding_order
+from .finding_query import (
+    ACTIVE_FINDING_STATUSES,
+    REOPEN_ON_OBSERVATION_STATUSES,
+    TERMINAL_FINDING_STATUSES,
+    FindingFilters,
+    FindingStatus,
+    finding_filters,
+    finding_order,
+)
 from .parsers import get_parser, list_parsers, parse_scan_results
 from .parsers.base import ParsedFinding, ParserRegistry, ScannerCategory
 from .parsers.validation import validate_findings
@@ -63,13 +78,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SecOps Dashboard API", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="SecOps Dashboard API", version="0.6.0", lifespan=lifespan)
 app.include_router(operations_router)
 app.include_router(accounts_router)
 app.include_router(workflows_router)
 app.include_router(scanner_tokens_router)
 app.include_router(github_sync_router)
 app.include_router(remediation_router)
+app.include_router(operational_router)
+app.include_router(ownership_router)
+app.include_router(automation_router)
+app.include_router(jira_sync_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -199,12 +218,14 @@ def _json_list(value: Optional[str]) -> list:
 
 
 def _serialize_finding(f: Finding) -> dict:
+    from .ownership import finding_ownership
+
     now = utcnow()
     acceptance_status = (
         "active" if f.risk_accepted_until and f.risk_accepted_until > now
         else "expired" if f.risk_accepted_at else "none"
     )
-    sla_status = "complete" if f.status in {"resolved", "closed"} else (
+    sla_status = "complete" if f.status in TERMINAL_FINDING_STATUSES else (
         "accepted" if acceptance_status == "active"
         else "untracked" if f.remediation_due_at is None
         else "overdue" if f.remediation_due_at < now
@@ -227,6 +248,7 @@ def _serialize_finding(f: Finding) -> dict:
         "criticality": f.criticality,
         "status": f.status,
         "assignee": f.assignee,
+        "ownership": finding_ownership(f),
         "risk_score": f.risk_score,
         "priority_score": f.priority_score,
         "priority_reasons": _json_list(f.priority_reasons_json),
@@ -258,6 +280,13 @@ def _serialize_finding(f: Finding) -> dict:
             "expires_at": f.risk_accepted_until.isoformat() + "Z" if f.risk_accepted_until else None,
             "accepted_by": f.risk_accepted_by,
             "reason": f.risk_acceptance_reason,
+        },
+        "workflow": {
+            "disposition_reason": f.disposition_reason,
+            "duplicate_of_id": f.duplicate_of_id,
+            "verification_requested_at": f.verification_requested_at.isoformat() + "Z" if f.verification_requested_at else None,
+            "verified_at": f.verified_at.isoformat() + "Z" if f.verified_at else None,
+            "verified_by": f.verified_by,
         },
         "signal_id": f.signal_id,
     }
@@ -358,7 +387,7 @@ def _get_or_create_asset(
                       .with_for_update().execution_options(populate_existing=True)).scalar_one()
 
 
-def _upsert_finding(db: Session, values: dict) -> tuple[Finding, bool, bool]:
+def _upsert_finding(db: Session, values: dict) -> tuple[Finding, bool, bool, str | None]:
     fingerprint = values["fingerprint"]
     previous_status = db.scalar(
         select(Finding.status).where(Finding.fingerprint == fingerprint)
@@ -389,8 +418,28 @@ def _upsert_finding(db: Session, values: dict) -> tuple[Finding, bool, bool]:
                 else_=Finding.criticality,
             ),
             "status": case(
-                (Finding.status.in_(["resolved", "closed"]), "open"),
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), "open"),
                 else_=Finding.status,
+            ),
+            "disposition_reason": case(
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), None),
+                else_=Finding.disposition_reason,
+            ),
+            "duplicate_of_id": case(
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), None),
+                else_=Finding.duplicate_of_id,
+            ),
+            "verification_requested_at": case(
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), None),
+                else_=Finding.verification_requested_at,
+            ),
+            "verified_at": case(
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), None),
+                else_=Finding.verified_at,
+            ),
+            "verified_by": case(
+                (Finding.status.in_(REOPEN_ON_OBSERVATION_STATUSES), None),
+                else_=Finding.verified_by,
             ),
             "risk_score": case(
                 (incoming_is_higher_risk, excluded.risk_score),
@@ -414,8 +463,8 @@ def _upsert_finding(db: Session, values: dict) -> tuple[Finding, bool, bool]:
     ).returning(Finding)
     finding = db.scalars(statement.execution_options(populate_existing=True)).one()
     is_new = (finding.occurrences or 1) == 1
-    resurfaced = not is_new and previous_status in {"resolved", "closed"}
-    return finding, is_new, resurfaced
+    resurfaced = not is_new and previous_status in REOPEN_ON_OBSERVATION_STATUSES
+    return finding, is_new, resurfaced, previous_status
 
 
 # -----------------------------
@@ -474,6 +523,16 @@ def ready():
         db.execute(select(IntelligenceSyncState.source).limit(1))
         db.execute(select(RemediationPolicy.project).limit(1))
         db.execute(select(VulnerabilityIntelligence.cve_id).limit(1))
+        db.execute(select(Team.id).limit(1))
+        db.execute(select(ProjectProfile.name).limit(1))
+        db.execute(select(CoverageExpectation.id).limit(1))
+        db.execute(select(TeamMembership.team_id).limit(1))
+        db.execute(select(OwnershipRule.project).limit(1))
+        db.execute(select(AutomationPolicy.project).limit(1))
+        db.execute(select(OperationalAlert.id).limit(1))
+        db.execute(select(JiraIssueLink.finding_id).limit(1))
+        db.execute(select(JiraUserMapping.user_id).limit(1))
+        db.execute(select(JiraSyncControl.id).limit(1))
         return {"status": "ready"}
     except Exception as exc:
         logger.error("Database readiness check failed (%s)", type(exc).__name__)
@@ -484,7 +543,7 @@ def ready():
 
 @app.get("/dashboard/summary")
 def dashboard_summary(request: Request):
-    active_statuses = ["open", "investigating"]
+    active_statuses = ACTIVE_FINDING_STATUSES
     db: Session = SessionLocal()
     try:
         scope = project_filters(request, Finding.project)
@@ -689,9 +748,13 @@ def upsert_asset(payload: AssetUpsert, request: Request):
 # -----------------------------
 @app.post("/ingest/signal")
 def ingest_signal(payload: SignalIn, request: Request):
+    from .accounts import _lock_accounts
+    from .ownership import route_new_finding
+
     require_write(request)
     require_project(request, payload.project)
     with SessionLocal.begin() as db:
+        _lock_accounts(db)
         now = utcnow()
         asset_key = (payload.asset or "unknown").strip()
         if not payload.project:
@@ -708,7 +771,7 @@ def ingest_signal(payload: SignalIn, request: Request):
         db.add(signal)
         db.flush()
         fp = make_fingerprint(payload.tool, payload.title, asset_key, project=payload.project)
-        finding, is_new, resurfaced = _upsert_finding(db, {
+        finding, is_new, resurfaced, previous_status = _upsert_finding(db, {
             "fingerprint": fp, "project": payload.project, "tool": payload.tool,
             "title": payload.title, "severity": payload.severity, "asset": asset_key,
             "asset_id": asset.id, "exposure": asset.exposure, "criticality": asset.criticality,
@@ -721,11 +784,16 @@ def ingest_signal(payload: SignalIn, request: Request):
         })
         if resurfaced:
             finding.resolved_at = None
+        if is_new:
+            route_new_finding(db, finding)
         refresh_finding(db, finding, now=now)
         if resurfaced:
             db.add(Comment(finding_id=finding.id, author="system",
-                           content="Finding resurfaced in a later signal and was reopened",
-                           action_type="reopened", created_at=now))
+                           content=("Verification failed: the finding was observed again and reopened"
+                                    if previous_status == "verification_pending"
+                                    else "Finding resurfaced in a later signal and was reopened"),
+                           action_type="verification_failed" if previous_status == "verification_pending" else "reopened",
+                           created_at=now))
         enqueue_finding(db, finding, event_id=signal.id, is_new=is_new)
         return {"accepted": True, "deduped": not is_new, "signal_id": signal.id,
                 "finding_id": finding.id, "risk_score": finding.risk_score,
@@ -791,32 +859,82 @@ def get_finding(finding_id: str, request: Request):
 # Update finding (status, assignee)
 # -----------------------------
 class FindingUpdate(StrictModel):
-    status: Optional[Literal["open", "investigating", "resolved", "closed"]] = None
+    status: Optional[FindingStatus] = None
     assignee: Optional[str] = Field(None, max_length=255)
+    reason: Optional[str] = Field(None, max_length=2_000)
+    duplicate_of_id: Optional[UUID] = None
+
+    @model_validator(mode="after")
+    def validate_disposition(self):
+        if self.status in {"false_positive", "duplicate"} and len((self.reason or "").strip()) < 20:
+            raise ValueError("False-positive and duplicate decisions require a reason of at least 20 characters")
+        if self.status == "duplicate" and self.duplicate_of_id is None:
+            raise ValueError("Duplicate decisions require the canonical finding ID")
+        if self.duplicate_of_id is not None and self.status != "duplicate":
+            raise ValueError("A canonical finding ID is valid only for duplicate decisions")
+        return self
 
 
 @app.patch("/findings/{finding_id}")
 def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
-    require_write(request)
+    from .accounts import _lock_accounts
+    from .ownership import validate_assignee
+
+    actor = require_write(request)
     db: Session = SessionLocal()
     try:
-        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project))).scalar_one_or_none()
+        _lock_accounts(db)
+        finding = db.execute(select(Finding).where(Finding.id == finding_id, *project_filters(request, Finding.project)).with_for_update()).scalar_one_or_none()
         if not finding:
             raise HTTPException(status_code=404, detail="Finding not found")
+
+        assignee = validate_assignee(db, payload.assignee, [finding.project]) if "assignee" in payload.model_fields_set else finding.assignee
 
         now = utcnow()
         changes = []
 
         if payload.status is not None and payload.status != finding.status:
             old_status = finding.status
+            if payload.status == "duplicate":
+                duplicate = db.execute(select(Finding).where(
+                    Finding.id == str(payload.duplicate_of_id),
+                    *project_filters(request, Finding.project),
+                )).scalar_one_or_none()
+                if duplicate is None or duplicate.id == finding.id or duplicate.project != finding.project:
+                    raise HTTPException(422, "Canonical duplicate target must be another finding in the same project")
             finding.status = payload.status
-            finding.resolved_at = now if payload.status in {"resolved", "closed"} else None
+            finding.resolved_at = now if payload.status in TERMINAL_FINDING_STATUSES else None
+            if payload.status == "verification_pending":
+                finding.verification_requested_at = now
+                finding.verified_at = None
+                finding.verified_by = None
+                finding.disposition_reason = None
+                finding.duplicate_of_id = None
+            elif payload.status in {"false_positive", "duplicate"}:
+                finding.disposition_reason = (payload.reason or "").strip()
+                finding.duplicate_of_id = str(payload.duplicate_of_id) if payload.duplicate_of_id else None
+                finding.verification_requested_at = None
+                finding.verified_at = None
+                finding.verified_by = None
+            elif payload.status == "resolved" and old_status == "verification_pending":
+                finding.verified_at = now
+                finding.verified_by = actor.username
+                finding.disposition_reason = payload.reason.strip() if payload.reason else None
+                finding.duplicate_of_id = None
+            else:
+                finding.disposition_reason = None
+                finding.duplicate_of_id = None
+                finding.verification_requested_at = None
+                finding.verified_at = None
+                finding.verified_by = None
             changes.append(f"Status changed from '{old_status}' to '{payload.status}'")
+            if payload.reason:
+                changes.append(f"Reason: {payload.reason.strip()}")
 
-        if payload.assignee is not None and payload.assignee != finding.assignee:
+        if "assignee" in payload.model_fields_set and assignee != finding.assignee:
             old_assignee = finding.assignee or "unassigned"
-            finding.assignee = payload.assignee if payload.assignee else None
-            new_assignee = payload.assignee or "unassigned"
+            finding.assignee = assignee
+            new_assignee = assignee or "unassigned"
             changes.append(f"Assignee changed from '{old_assignee}' to '{new_assignee}'")
 
         if changes:
@@ -828,6 +946,11 @@ def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
                 created_at=now,
             )
             db.add(comment)
+            audit_event(db, request, "finding.update", "finding", finding.id, {
+                "status": finding.status,
+                "assignee": finding.assignee,
+                "fields": sorted(payload.model_fields_set),
+            })
 
         db.commit()
         db.refresh(finding)
@@ -839,6 +962,13 @@ def update_finding(finding_id: str, payload: FindingUpdate, request: Request):
                 "status": finding.status,
                 "assignee": finding.assignee,
                 "resolved_at": finding.resolved_at.isoformat() + "Z" if finding.resolved_at else None,
+                "workflow": {
+                    "disposition_reason": finding.disposition_reason,
+                    "duplicate_of_id": finding.duplicate_of_id,
+                    "verification_requested_at": finding.verification_requested_at.isoformat() + "Z" if finding.verification_requested_at else None,
+                    "verified_at": finding.verified_at.isoformat() + "Z" if finding.verified_at else None,
+                    "verified_by": finding.verified_by,
+                },
             },
             "changes": changes,
         }
@@ -903,7 +1033,7 @@ def list_risks(request: Request):
                 func.sum(Finding.risk_score).label("risk_sum"),
                 func.avg(Finding.risk_score).label("avg_risk"),
             )
-            .where(*project_filters(request, Finding.project), Finding.status.in_(["open", "investigating"]))
+            .where(*project_filters(request, Finding.project), Finding.status.in_(ACTIVE_FINDING_STATUSES))
             .group_by(Finding.project, Finding.asset)
             .order_by(func.max(Finding.risk_score).desc(), func.count().desc(), Finding.project, Finding.asset)
         ).all()
@@ -941,7 +1071,7 @@ def risks_by_asset(request: Request, limit: int = 100):
             )
             .join(Finding, Finding.asset_id == Asset.id)
             .where(*project_filters(request, Asset.project), *project_filters(request, Finding.project),
-                   Finding.status.in_(["open", "investigating"]))
+                   Finding.status.in_(ACTIVE_FINDING_STATUSES))
             .group_by(Asset.project, Asset.key)
             .order_by(func.max(Finding.risk_score).desc(), func.count(Finding.id).desc(), Asset.project, Asset.key)
             .limit(max(1, min(limit, 200)))
@@ -1093,6 +1223,9 @@ class ScanImportRequest(StrictModel):
 
 @app.post("/import/scan")
 def import_scan(payload: ScanImportRequest, request: Request):
+    from .accounts import _lock_accounts
+    from .ownership import route_new_finding
+
     require_write(request)
     started_at = utcnow()
     timeout = positive_int_setting("IMPORT_TIMEOUT_SECONDS", 900)
@@ -1122,6 +1255,7 @@ def import_scan(payload: ScanImportRequest, request: Request):
         if len(parsed_findings) > max_findings:
             raise HTTPException(status_code=413, detail=f"Parsed scan exceeds the {max_findings}-finding limit")
         with SessionLocal.begin() as db:
+            _lock_accounts(db)
             now = utcnow()
             new_findings = deduplicated = 0
             observed = {}
@@ -1158,7 +1292,7 @@ def import_scan(payload: ScanImportRequest, request: Request):
                 fp = make_fingerprint(pf.tool, pf.title, asset_key, project=project,
                                       source_id=fingerprint_source, file_path=pf.file_path, line_number=pf.line_number,
                                       cve_id=pf.cve_id, component=component)
-                finding, is_new, resurfaced = _upsert_finding(db, {
+                finding, is_new, resurfaced, previous_status = _upsert_finding(db, {
                     "fingerprint": fp, "project": project, "tool": pf.tool, "title": pf.title,
                     "source_id": source_id, "component": component,
                     "component_version": getattr(pf, "component_version", None),
@@ -1173,11 +1307,16 @@ def import_scan(payload: ScanImportRequest, request: Request):
                 })
                 if resurfaced:
                     finding.resolved_at = None
+                if is_new:
+                    route_new_finding(db, finding)
                 refresh_finding(db, finding, now=now)
                 if resurfaced:
                     db.add(Comment(finding_id=finding.id, author="system",
-                                   content="Finding resurfaced in a later scan and was reopened",
-                                   action_type="reopened", created_at=now))
+                                   content=("Verification failed: the finding was observed again and reopened"
+                                            if previous_status == "verification_pending"
+                                            else "Finding resurfaced in a later scan and was reopened"),
+                                   action_type="verification_failed" if previous_status == "verification_pending" else "reopened",
+                                   created_at=now))
                 new_findings += int(is_new)
                 deduplicated += int(not is_new)
                 previous = observed.get(finding.id)

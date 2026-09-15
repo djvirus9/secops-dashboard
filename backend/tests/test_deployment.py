@@ -23,6 +23,12 @@ from app.deployment import validate_backend_settings, validate_session_settings,
     ("GITHUB_SYNC_TOKEN", "x" * 513),
     ("GITHUB_SYNC_TOKEN", "x" * 32 + "\n"),
     ("GITHUB_SYNC_TOKEN", "é" * 32),
+    ("AUTOMATION_POLL_SECONDS", "0"),
+    ("AUTOMATION_POLL_SECONDS", "301"),
+    ("JIRA_SYNC_INTERVAL_MINUTES", "14"),
+    ("JIRA_SYNC_INTERVAL_MINUTES", "1441"),
+    ("JIRA_SYNC_ENABLED", "maybe"),
+    ("JIRA_SYNC_ENABLED", "true"),
 ])
 def test_invalid_deployment_configuration_is_rejected(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
@@ -64,6 +70,21 @@ def test_placeholder_database_password_is_rejected_without_exposure(monkeypatch)
     with pytest.raises(ValueError, match="PostgreSQL password") as error:
         validate_backend_settings()
     assert "changeme" not in str(error.value)
+
+
+def test_automation_worker_validates_only_its_own_credentials(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("INGEST_API_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_SYNC_TOKEN", "invalid-but-unrelated")
+    validate_worker_settings("automation")
+    monkeypatch.setenv("JIRA_SYNC_ENABLED", "true")
+    with pytest.raises(ValueError, match="JIRA_SYNC_ENABLED"):
+        validate_worker_settings("automation")
+    monkeypatch.setenv("JIRA_BASE_URL", "https://synthetic.atlassian.net")
+    monkeypatch.setenv("JIRA_EMAIL", "synthetic@example.invalid")
+    monkeypatch.setenv("JIRA_API_TOKEN", "synthetic-local-test-token")
+    validate_worker_settings("automation")
 
 
 @pytest.fixture

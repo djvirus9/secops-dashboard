@@ -32,6 +32,13 @@ services:
     build:
       context: ../backend
 
+  automation-worker:
+    extends:
+      file: compose.services.yml
+      service: automation-worker
+    build:
+      context: ../backend
+
   frontend:
     extends:
       file: compose.services.yml

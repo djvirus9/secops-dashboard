@@ -11,8 +11,8 @@ instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
-See the [0.4.0 release notes](CHANGELOG.md) for remediation intelligence,
-explainable priority, SLA workflows, and upgrade notes.
+See the [0.6.0 development notes](CHANGELOG.md) for team-based assignment,
+operational alerts, Jira progress synchronization, and upgrade notes.
 
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
 
@@ -103,6 +103,29 @@ set their own HTTPS origin explicitly.
 Administrators create accounts and project grants on the Users page. Each account
 can change its own password and keep private saved finding views (up to 100).
 Saved filters are always applied inside the current user's project grants.
+
+The Catalog page layers teams, escalation contacts, business context, and
+repository links over existing exact project keys. The Coverage page compares
+expected scanner and GitHub sources with durable run history, distinguishing
+healthy, stale, failing, missing, and intentionally disabled controls. Clean scans
+remain visible scanner evidence, GitHub zero-alert snapshots are not labeled clean,
+and neither closes findings merely because a result is absent. See the
+[operational ownership and coverage guide](docs/operations-coverage.md).
+
+My Queue shows active findings assigned to the signed-in username. Individual
+finding workflow supports verification pending, verified resolution, reasoned
+false positives, and same-project duplicate links. A repeated observation while
+verification is pending reopens the finding and records failed verification.
+Administrators can review these and other control-plane changes on the Audit page.
+
+Team membership and opt-in project routing now connect that catalog to real
+work: validated assignees, team queues, and a Needs owner queue that includes
+legacy invalid assignments. Membership never grants access to a project.
+Operations adds project-scoped SLA/required-source alerts, acknowledgements,
+and optional shared-channel Slack reminders. Jira Sync adds opt-in polling and
+explicitly approved status/assignee pushes; a Jira Done transition requests
+verification rather than proving a fix. See the
+[remediation automation setup and safety guide](docs/remediation-automation.md).
 
 Administrators and analysts can select up to 200 explicit findings for a bulk
 triage action. The whole request is rejected if any selected finding is missing,
@@ -200,7 +223,7 @@ and the runbook before switching an existing deployment.
 Open <http://localhost:5000/login> and enter the initial administrator credentials.
 All published ports bind to loopback by default. The host-side TLS reverse proxy
 is the public entrypoint. Backend startup validates configuration and applies
-migrations; the frontend and all three workers wait for backend readiness. The GitHub
+migrations; the frontend and all four workers wait for backend readiness. The GitHub
 worker remains healthy and idle when `GITHUB_SYNC_TOKEN` is unset.
 
 `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` bootstrap the first administrator
@@ -314,6 +337,11 @@ with dependency audits, CodeQL, production browser tests, and Docker builds.
   authenticated feed visibility with administrator-controlled refreshes.
 - Remediation policies are readable within project grants and administrator-managed;
   risk acceptance is an expiring, audited administrator session action.
+- `GET /catalog`, `GET /coverage`, and `GET /my-queue`: project-scoped ownership,
+  reporting evidence, and personal active work; catalog/coverage changes require
+  an administrator.
+- `GET /audit-events`: bounded administrator-only audit review with server-side
+  actor, action, and object filters.
 - Account management, integration status/tests, notification review, and authenticated
   OpenAPI documentation: administrative access.
 - `MAX_IMPORT_REQUEST_BYTES`, `MAX_SCAN_BYTES`, and `MAX_FINDINGS_PER_IMPORT`

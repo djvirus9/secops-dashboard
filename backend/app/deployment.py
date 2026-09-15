@@ -16,7 +16,21 @@ WORKER_LIMITS = {
     },
     "github": {"GITHUB_SYNC_POLL_SECONDS": (5, 1, 300)},
     "intelligence": {"INTELLIGENCE_POLL_SECONDS": (5, 1, 300)},
+    "automation": {"AUTOMATION_POLL_SECONDS": (5, 1, 300),
+                   "JIRA_SYNC_INTERVAL_MINUTES": (30, 15, 1440)},
 }
+
+
+def _validate_jira_sync() -> None:
+    enabled = os.environ.get("JIRA_SYNC_ENABLED", "false").strip().lower()
+    if enabled not in {"true", "false"}:
+        raise ValueError("JIRA_SYNC_ENABLED must be true or false")
+    if enabled == "true":
+        from .jira_sync.client import JiraError, settings
+        try:
+            settings()
+        except JiraError as exc:
+            raise ValueError("JIRA_SYNC_ENABLED requires a valid Jira Cloud tenant and server credentials") from exc
 
 
 def validate_session_settings() -> None:
@@ -94,6 +108,7 @@ def _validate_limits(limits: dict[str, tuple[int, int, int]]) -> None:
 
 def validate_backend_settings() -> None:
     _validate_github_token()
+    _validate_jira_sync()
     if os.environ.get("ALLOW_INSECURE_NO_AUTH", "").lower() not in TRUE_VALUES:
         _require_secret("API_KEY", 32)
         _require_secret("INGEST_API_KEY", 32)
@@ -110,6 +125,8 @@ def validate_backend_settings() -> None:
         "NOTIFICATION_POLL_SECONDS": (5, 1, 300),
         "GITHUB_SYNC_POLL_SECONDS": (5, 1, 300),
         "INTELLIGENCE_POLL_SECONDS": (5, 1, 300),
+        "AUTOMATION_POLL_SECONDS": (5, 1, 300),
+        "JIRA_SYNC_INTERVAL_MINUTES": (30, 15, 1440),
         "NOTIFICATION_MAX_ATTEMPTS": (5, 1, 20),
         "SESSION_TTL_SECONDS": (43200, 300, 604800),
         "SESSION_IDLE_TIMEOUT_SECONDS": (1800, 60, 86400),
@@ -126,6 +143,8 @@ def validate_worker_settings(worker: str) -> None:
     _validate_database()
     if worker == "github":
         _validate_github_token()
+    if worker == "automation":
+        _validate_jira_sync()
     _validate_limits(WORKER_LIMITS[worker])
 
 
@@ -135,7 +154,7 @@ def main() -> int:
         if len(sys.argv) == 3 and sys.argv[1] == "--worker":
             worker = sys.argv[2]
         elif len(sys.argv) != 1:
-            raise ValueError("Usage: python -m app.deployment [--worker notification|github|intelligence]")
+            raise ValueError("Usage: python -m app.deployment [--worker notification|github|intelligence|automation]")
         validate_worker_settings(worker) if worker else validate_backend_settings()
     except ValueError as exc:
         print(f"Invalid deployment configuration: {exc}", file=sys.stderr)

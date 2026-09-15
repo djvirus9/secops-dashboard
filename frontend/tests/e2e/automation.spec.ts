@@ -127,13 +127,17 @@ test('automation pages are admin-only and do not fetch data for analysts', async
   await page.getByLabel('Password', { exact: true }).fill('Regression-password-7S9rY2aK5qW8');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
-  for (const [path, label] of [['/scanner-tokens', 'Scanner tokens'], ['/github-sync', 'GitHub sync']]) {
+  for (const [path, label] of [
+    ['/scanner-tokens', 'Scanner tokens'], ['/github-sync', 'GitHub sync'],
+    ['/audit', 'Audit'],
+  ]) {
     await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: label, exact: true })).toHaveCount(0);
     const requests: string[] = []; const capture = (request: { url: () => string }) => { if (request.url().endsWith(`/api${path}`)) requests.push(request.url()); };
     page.on('request', capture);
     await page.goto(path);
     await expect(page.getByRole('main').getByRole('alert')).toHaveText('This page is available to administrators.');
     expect(requests).toEqual([]); page.off('request', capture);
-    expect((await page.request.get(`/api${path}`)).status()).toBe(403);
+    const apiPath = path === '/audit' ? '/audit-events' : path;
+    expect((await page.request.get(`/api${apiPath}`)).status()).toBe(403);
   }
 });

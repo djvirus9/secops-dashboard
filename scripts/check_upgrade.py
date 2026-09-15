@@ -28,7 +28,8 @@ def main():
                           DASHBOARD_PASSWORD=bootstrap_password, DASHBOARD_ORIGINS="http://localhost:5000",
                           SESSION_COOKIE_SECURE="false", SESSION_TTL_SECONDS="43200",
                           SESSION_IDLE_TIMEOUT_SECONDS="1800", ALLOWED_HOSTS="testserver,localhost,127.0.0.1",
-                          ALLOW_INSECURE_NO_AUTH="false", ALLOW_UNVERIFIED_PARSERS="false", STORE_RAW_SCAN_DATA="false")
+                          ALLOW_INSECURE_NO_AUTH="false", ALLOW_UNVERIFIED_PARSERS="false", STORE_RAW_SCAN_DATA="false",
+                          JIRA_SYNC_ENABLED="false", JIRA_SYNC_INTERVAL_MINUTES="30", AUTOMATION_POLL_SECONDS="5")
         for name in ("GITHUB_SYNC_TOKEN", "SLACK_WEBHOOK_URL", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_PROJECT_KEY"):
             os.environ[name] = ""
 
@@ -109,6 +110,11 @@ def main():
             assert client.get("/saved-views").json()["results"][0]["name"] == "Existing private view"
             assert client.get("/scanner-tokens").json()["count"] == 0
             assert client.get("/github-sync").json()["configured"] is False
+            assert client.get("/jira-sync").json()["enabled"] is False
+            assert client.get("/automation").json()["policies"] == []
+            assert value["ownership"]["status"] == "invalid_assignee"
+            assert client.get("/ownership/queue", params={"view": "unassigned"}).json()["count"] == 1
+            assert client.get("/ready").status_code == 200
             intelligence = client.get("/intelligence/status").json()["sources"]
             assert {row["source"] for row in intelligence} == {"cisa_kev", "first_epss"}
             assert value["priority_score"] == 30 and value["remediation_due_at"] is not None
@@ -118,7 +124,7 @@ def main():
             assert client.post("/auth/login", headers={"Origin": "http://localhost:5000"},
                                json={"username": "upgrade-admin", "password": password}).status_code == 200
         engine.dispose()
-    print("Synthetic 0.2 upgrade preserved workflow data and added explainable priority, SLA and intelligence state")
+    print("Synthetic 0.2 upgrade preserved workflow data, retained legacy ownership, and left v0.6 automation disabled")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ const env = { ...process.env, DATABASE_URL: `sqlite:///${databaseDir}/integratio
   INGEST_API_KEY: 'integration-scanner-9c7b5a3e1f8d6c4b2a0e', ALLOWED_HOSTS: '127.0.0.1,localhost',
   CORS_ORIGINS: 'http://127.0.0.1:15110', DASHBOARD_ORIGINS: 'http://127.0.0.1:15110', SESSION_COOKIE_SECURE: 'false',
   DASHBOARD_USERNAME: 'reviewer', DASHBOARD_PASSWORD: 'Integration-password-9b7f2d1e6c4a', ALLOW_INSECURE_NO_AUTH: 'false', ALLOW_UNVERIFIED_PARSERS: 'false',
-  SLACK_WEBHOOK_URL: '', JIRA_BASE_URL: '', JIRA_EMAIL: '', JIRA_API_TOKEN: '', JIRA_PROJECT_KEY: '',
+  SLACK_WEBHOOK_URL: '', JIRA_BASE_URL: '', JIRA_EMAIL: '', JIRA_API_TOKEN: '', JIRA_PROJECT_KEY: '', JIRA_SYNC_ENABLED: 'false',
   GITHUB_SYNC_TOKEN: '',
   STORE_RAW_SCAN_DATA: 'false', PYTHONDONTWRITEBYTECODE: '1' };
 const children = [];

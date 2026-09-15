@@ -91,6 +91,13 @@ and an explicit list grants only exact project names. Include the empty string
 Saved filters cannot expand those grants. The last active administrator cannot
 be disabled or demoted.
 
+All signed-in users can read Catalog and Coverage data within the same project
+grants. Administrators manage team/project profiles and coverage expectations;
+the Audit page remains administrator-only. My Queue additionally requires a user
+session and matches the assignee to that exact dashboard username, so automation
+keys cannot impersonate a personal worklist. See
+[operational ownership and coverage](operations-coverage.md).
+
 Sessions expire after 43,200 seconds absolute or 1,800 seconds idle by default.
 `SESSION_TTL_SECONDS` accepts 300–604,800 and `SESSION_IDLE_TIMEOUT_SECONDS` accepts
 60–86,400; idle must not exceed the absolute lifetime. Password changes/recovery,
@@ -155,7 +162,7 @@ curl --fail http://127.0.0.1:8000/ready
 
 For source mode, replace `up --no-build --wait` with `up --build --wait`.
 
-All six services should be running and healthy. Backend startup validates its
+All seven services should be running and healthy. Backend startup validates its
 configuration and upgrades the schema before serving; workers and frontend wait
 for backend readiness. Each worker health check verifies a recent successful
 database polling heartbeat. Compose exposes administrative, ingestion, and browser
@@ -166,7 +173,11 @@ inspect the Notifications page for failed or uncertain deliveries. The intellige
 worker stays idle until a source is enabled or queued; inspect source freshness on
 Remediation because its heartbeat does not prove CISA/FIRST reachability.
 
-The images run as non-root users. Backend and all three workers use Python 3.14; frontend
+The automation worker evaluates enabled project policies and opt-in Jira progress;
+inspect Operations policy errors and Jira Sync in addition to its heartbeat.
+See [remediation automation](remediation-automation.md) before enabling delivery.
+
+The images run as non-root users. Backend and all four workers use Python 3.14; frontend
 build and runtime default to Node.js 24 LTS. To evaluate Node 26, set
 `FRONTEND_NODE_MAJOR=26` in `.env` and rebuild with the source Compose file; direct Docker builds
 can use `--build-arg NODE_MAJOR=26`. This changes all frontend image stages.
@@ -235,8 +246,10 @@ alongside the backup inventory. Preserve credentials separately in your secret
 manager. Retention and scheduled backups are operator responsibilities; the app
 does not automatically purge historical records.
 
-Backups contain password hashes, project grants, session records,
-saved views, audit history and, from 0.3, scanner-token hashes and GitHub sync state. Protect them as authentication data. A restored
+Backups contain password hashes, project grants, session records, saved views,
+audit history, scanner-token hashes, GitHub sync state, ownership/coverage
+configuration, and structured remediation decisions. Protect them as authentication
+and security-operations data. A restored
 database can reinstate sessions that were valid when the backup was taken;
 revoke affected accounts' sessions through password recovery and rotate/revoke
 affected scanner tokens before resuming
@@ -251,7 +264,8 @@ infra/verify-restore.sh /secure/backups/secops-before-upgrade.dump
 and checks archive readability before publishing the file. `verify-restore.sh`
 restores into a newly created temporary database, checks findings, comments,
 users, sessions, saved views, scanner tokens, GitHub state, intelligence cache,
-SLA policies, and intelligence source state, and removes only that temporary database afterward. It never replaces
+SLA policies, intelligence source state, ownership, coverage, Jira progress and
+operational alerts, and removes only that temporary database afterward. It never replaces
 the active database. Use `SECOPS_ENV_FILE=/path/to/operator.env` if needed.
 For image mode, also set `SECOPS_COMPOSE_FILE=infra/docker-compose.images.yml`;
 its image references must be present in that environment file or exported shell.
@@ -262,11 +276,19 @@ and `SECOPS_EXPECTED_SAVED_VIEWS` optionally check identity/workflow tables;
 `SECOPS_EXPECTED_GITHUB_SYNC_RUNS` and `SECOPS_EXPECTED_GITHUB_ALERTS` check 0.3 state.
 `SECOPS_EXPECTED_VULNERABILITY_INTELLIGENCE`, `SECOPS_EXPECTED_REMEDIATION_POLICIES`,
 and `SECOPS_EXPECTED_INTELLIGENCE_SYNC_STATES` check 0.4 state.
-session counts include revoked sessions. A mismatch fails verification and still
+For 0.5/0.6 state, use `SECOPS_EXPECTED_TEAMS`, `SECOPS_EXPECTED_PROJECTS`,
+`SECOPS_EXPECTED_COVERAGE_EXPECTATIONS`, `SECOPS_EXPECTED_TEAM_MEMBERSHIPS`,
+`SECOPS_EXPECTED_OWNERSHIP_RULES`, `SECOPS_EXPECTED_JIRA_ISSUE_LINKS`,
+`SECOPS_EXPECTED_JIRA_USER_MAPPINGS`, `SECOPS_EXPECTED_JIRA_SYNC_CONTROL`,
+`SECOPS_EXPECTED_AUTOMATION_POLICIES`, and `SECOPS_EXPECTED_OPERATIONAL_ALERTS`.
+Session counts include revoked sessions. A mismatch fails verification and still
 removes the temporary restore database. Older 0.1 backups without these tables
 report zero and explicitly report the table as absent. CI requires one synthetic
-finding, comment, user, revoked session, private saved view, revoked scanner token
-and unconfigured GitHub connection to survive restore; no remote GitHub request is made.
+finding, two comments (routing and manual), user, revoked session, private saved
+view, revoked scanner token, unconfigured GitHub connection, owning team/project,
+membership, routing rule, coverage expectation and disabled automation policy to
+survive restore. Jira/operational-alert tables remain empty; no external integration
+is activated and no remote GitHub/Jira/Slack request is made.
 These scripts require the configured PostgreSQL role to create/drop databases;
 use a separate operator environment when your database service restricts that
 privilege. Review row counts and test a representative restored finding before
@@ -277,7 +299,7 @@ name, and verify it before changing the application's database target. Example
 for a database named `secops_restored`, using the existing cluster:
 
 ```bash
-docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" stop frontend backend notification-worker github-worker intelligence-worker
+docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" stop frontend backend notification-worker github-worker intelligence-worker automation-worker
 docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec postgres sh -c 'createdb -U "$POSTGRES_USER" secops_restored'
 docker compose --env-file .env -f "${SECOPS_COMPOSE_FILE:-infra/docker-compose.yml}" exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d secops_restored --exit-on-error --no-owner --no-privileges' < /secure/backups/secops-before-upgrade.dump
 ```
@@ -349,6 +371,11 @@ Revision 0007 adds remediation policies, cached KEV/EPSS evidence, worker state,
 priority explanations, SLA deadlines, resolution timestamps, and expiring risk
 acceptance. Existing finding identity and triage are preserved; only new priority
 and deadline fields are backfilled. See [remediation intelligence](remediation-intelligence.md).
+Revision 0008 adds project/team profiles, coverage expectations, and structured
+disposition/verification fields. It preserves finding identities and existing
+project strings. A downgrade is refused after the new inventory or workflow has
+been used because removing it would discard operator decisions and evidence. See
+[operational ownership and coverage](operations-coverage.md).
 For the local helper, stop services and copy the complete `.local` directory to
 protected backup storage before updating source; start applies migrations to the
 same `.local/secops.db`. Do not delete `.local` or replace its initial credentials

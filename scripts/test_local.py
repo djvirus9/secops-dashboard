@@ -103,6 +103,7 @@ class LocalHelperTests(unittest.TestCase):
         ambient = {"DATABASE_URL": "postgresql://synthetic.invalid/db", "SLACK_WEBHOOK_URL": "https://synthetic.invalid/webhook",
                    "JIRA_BASE_URL": "https://synthetic.invalid", "JIRA_EMAIL": "test@example.invalid",
                    "JIRA_API_TOKEN": "synthetic", "JIRA_PROJECT_KEY": "DEMO",
+                   "JIRA_SYNC_ENABLED": "true", "JIRA_SYNC_INTERVAL_MINUTES": "1",
                    "GITHUB_SYNC_TOKEN": "ambient-token-that-must-never-be-used",
                    "NO_PROXY": "upper.example.invalid", "no_proxy": "lower.example.invalid"}
         with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \
@@ -116,6 +117,8 @@ class LocalHelperTests(unittest.TestCase):
             self.assertEqual(os.environ["SLACK_WEBHOOK_URL"], ambient["SLACK_WEBHOOK_URL"])
             self.assertEqual(environment["SESSION_COOKIE_SECURE"], "false")
             self.assertEqual(environment["GITHUB_SYNC_TOKEN"], "")
+            self.assertEqual(environment["JIRA_SYNC_ENABLED"], "false")
+            self.assertEqual(environment["JIRA_SYNC_INTERVAL_MINUTES"], "30")
             self.assertEqual(environment["DASHBOARD_ORIGINS"], "http://127.0.0.1:5050,http://localhost:5050")
 
     def test_frontend_process_receives_no_backend_or_bootstrap_secrets(self):
@@ -179,11 +182,21 @@ class LocalHelperTests(unittest.TestCase):
             env = local.environment(5050, 8000)
             for name in ("backend", "github-worker"):
                 self.assertEqual(local.service_environment(name, env)["GITHUB_SYNC_TOKEN"], token)
-            for name in ("frontend", "worker", "intelligence-worker", "migration"):
+            for name in ("frontend", "worker", "intelligence-worker", "automation-worker", "migration"):
                 self.assertNotIn("GITHUB_SYNC_TOKEN", local.service_environment(name, env))
-            for name in ("frontend", "worker", "github-worker", "intelligence-worker", "migration"):
+            for name in ("frontend", "worker", "github-worker", "intelligence-worker", "automation-worker", "migration"):
                 self.assertNotIn("API_KEY", local.service_environment(name, env))
                 self.assertNotIn("INGEST_API_KEY", local.service_environment(name, env))
+
+    def test_automation_worker_environment_is_minimal(self):
+        env = {"DATABASE_URL": "sqlite:///synthetic.db", "PATH": "/synthetic/bin",
+               "JIRA_SYNC_ENABLED": "false", "JIRA_SYNC_INTERVAL_MINUTES": "30",
+               "JIRA_API_TOKEN": "synthetic-jira", "AUTOMATION_POLL_SECONDS": "5",
+               "API_KEY": "must-not-reach-worker", "INGEST_API_KEY": "must-not-reach-worker",
+               "DASHBOARD_PASSWORD": "must-not-reach-worker", "GITHUB_SYNC_TOKEN": "must-not-reach-worker"}
+        child = local.service_environment("automation-worker", env)
+        self.assertEqual(set(child), {"DATABASE_URL", "PATH", "JIRA_SYNC_ENABLED", "JIRA_SYNC_INTERVAL_MINUTES",
+                                      "JIRA_API_TOKEN", "AUTOMATION_POLL_SECONDS"})
 
     def test_github_token_refuses_getpass_echo_fallback(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(local, "LOCAL", Path(directory)), \

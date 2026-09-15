@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { cp } from 'node:fs/promises';
+import { handleV06 } from './v06-fixture.mjs';
 await cp('public', '.next/standalone/public', { recursive: true });
 await cp('.next/static', '.next/standalone/.next/static', { recursive: true });
 
@@ -15,7 +16,7 @@ const finding = (index) => ({
   id: `${index.toString(16).padStart(8, '0')}-1111-4111-8111-111111111111`,
   fingerprint: `fixture-${index}`, tool: 'bandit', title: `Finding ${index}`, severity: 'high',
   asset: 'src/app.py', project: 'payments', asset_id: null, exposure: 'internal', criticality: 'medium',
-  status: 'open', assignee: null, risk_score: 70, occurrences: 1, description: 'Synthetic regression evidence',
+  status: 'open', assignee: index === 1 ? 'reviewer' : null, risk_score: 70, occurrences: 1, description: 'Synthetic regression evidence',
   priority_score: index === 1 ? 85 : 30,
   priority_reasons: [{ factor: 'High severity', points: 30 }],
   recommendation: 'Synthetic regression recommendation', cwe_id: 79,
@@ -28,10 +29,11 @@ const finding = (index) => ({
   first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-01-02T00:00:00Z', signal_id: 'fixture', comments: [],
   remediation_due_at: '2099-01-31T00:00:00Z', resolved_at: null, sla_status: 'on_track',
   risk_acceptance: { status: 'none', accepted_at: null, expires_at: null, accepted_by: null, reason: null },
+  workflow: { disposition_reason: null, duplicate_of_id: null, verification_requested_at: null, verified_at: null, verified_by: null },
 });
 const asset = (index) => ({ id: String(index), project: 'payments', key: `asset-${index}.invalid`, name: `Asset ${index}`, owner: 'security', environment: 'prod', criticality: 'medium', exposure: 'internal', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' });
 let state;
-function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0, scannerTokens: [], tokenVersion: 0, githubConfigured: true, githubConnections: [], githubRuns: {}, intelligence: [{ source: 'cisa_kev', enabled: false, interval_hours: 24, status: 'idle', record_count: 1, last_synced_at: null, next_sync_at: '2099-01-01T00:00:00Z', stale: true, last_error: null }, { source: 'first_epss', enabled: false, interval_hours: 24, status: 'succeeded', record_count: 120, last_synced_at: '2026-01-02T00:00:00Z', next_sync_at: '2099-01-01T00:00:00Z', stale: false, last_error: null }], policies: [{ project: '', critical_days: 7, high_days: 30, medium_days: 90, low_days: 180, info_days: 365, kev_days: 7, updated_at: '2026-01-02T00:00:00Z' }] }; }
+function reset() { sessions = new Map([['regression-session', users.reviewer]]); savedViews = []; nextView = 1; state = { findings: Array.from({ length: 121 }, (_, index) => finding(index + 1)), assets: Array.from({ length: 121 }, (_, index) => asset(index + 1)), requests: [], failPatch: 0, failIntegrations: 0, failSummary: 0, failFindings: 0, scannerTokens: [], tokenVersion: 0, githubConfigured: true, githubConnections: [], githubRuns: {}, teams: [{ id: '00000001-5555-4555-8555-555555555555', name: 'Platform Security', contact: '#platform-security', active: true }], projects: [{ name: 'payments', display_name: 'Payments', team_id: '00000001-5555-4555-8555-555555555555', team_name: 'Platform Security', business_unit: 'Commerce', tier: 'critical', repository_url: 'https://github.com/example/payments', active: true }], coverage: [{ id: '00000001-6666-4666-8666-666666666666', project: 'payments', team: 'Platform Security', source_type: 'scanner', source: 'bandit', interval_hours: 24, required: true, enabled: true, health: 'healthy', last_status: 'completed', last_successful_at: '2026-01-02T00:00:00Z', last_clean_at: '2026-01-02T00:00:00Z', last_findings: 0, next_due_at: '2099-01-03T00:00:00Z' }], auditEvents: [{ id: '00000001-7777-4777-8777-777777777777', actor: 'reviewer', action: 'finding.update', object_type: 'finding', object_id: '00000001-1111-4111-8111-111111111111', details: { fields: ['status'] }, created_at: '2026-01-02T00:00:00Z' }], intelligence: [{ source: 'cisa_kev', enabled: false, interval_hours: 24, status: 'idle', record_count: 1, last_synced_at: null, next_sync_at: '2099-01-01T00:00:00Z', stale: true, last_error: null }, { source: 'first_epss', enabled: false, interval_hours: 24, status: 'succeeded', record_count: 120, last_synced_at: '2026-01-02T00:00:00Z', next_sync_at: '2099-01-01T00:00:00Z', stale: false, last_error: null }], policies: [{ project: '', critical_days: 7, high_days: 30, medium_days: 90, low_days: 180, info_days: 365, kev_days: 7, updated_at: '2026-01-02T00:00:00Z' }] }; }
 reset();
 const send = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
 const server = createServer(async (req, res) => {
@@ -60,11 +62,60 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/auth/me') return send(res, 200, { user });
   if (url.pathname === '/auth/logout') { sessions.delete(token); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
   if (url.pathname === '/auth/password') { sessions.clear(); res.setHeader('Set-Cookie', 'secops_session=; Path=/; Max-Age=0'); return send(res, 200, { ok: true }); }
-  if (user.role !== 'admin' && ['/users', '/integrations', '/notifications', '/scanner-tokens', '/github-sync'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && ['/users', '/integrations', '/notifications', '/scanner-tokens', '/github-sync', '/audit-events'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && req.method !== 'GET' && url.pathname.startsWith('/coverage')) return send(res, 403, { detail: 'Administrator required' });
+  if (user.role !== 'admin' && req.method !== 'GET' && url.pathname.startsWith('/catalog')) return send(res, 403, { detail: 'Administrator required' });
   if (user.role !== 'admin' && req.method !== 'GET' && ['/intelligence', '/remediation'].some(path => url.pathname === path || url.pathname.startsWith(`${path}/`))) return send(res, 403, { detail: 'Administrator required' });
   if (user.role !== 'admin' && url.pathname.endsWith('/risk-acceptance')) return send(res, 403, { detail: 'Administrator required' });
   if (user.role === 'viewer' && req.method !== 'GET' && !url.pathname.startsWith('/saved-views')) return send(res, 403, { detail: 'Read-only account' });
   state.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: req.method, body, actor: user.username, hasAuthorization: Boolean(req.headers.authorization), hasApiKey: Boolean(req.headers['x-api-key']), hasSpoofedUser: Boolean(req.headers['x-secops-user']) });
+  if (handleV06({ req, res, url, body, user, users, state, send })) return;
+  if (url.pathname === '/catalog') {
+    const projects = user.projects === null ? state.projects : state.projects.filter(project => user.projects.includes(project.name));
+    const teamIds = new Set(projects.map(project => project.team_id).filter(Boolean));
+    const teams = user.projects === null ? state.teams : state.teams.filter(team => teamIds.has(team.id));
+    const unmanaged = user.projects === null || user.projects.includes('unmanaged-service') ? ['unmanaged-service'] : [];
+    return send(res, 200, { teams, projects, unmanaged_projects: unmanaged });
+  }
+  if (url.pathname === '/catalog/teams') {
+    const team = { id: `${String(state.teams.length + 1).padStart(8, '0')}-5555-4555-8555-555555555555`, ...body, active: true };
+    state.teams.push(team); return send(res, 201, { team });
+  }
+  if (url.pathname === '/catalog/projects') {
+    const team = state.teams.find(item => item.id === body.team_id);
+    const project = { ...body, team_name: team?.name || null, active: true };
+    state.projects.push(project); return send(res, 201, { project });
+  }
+  if (url.pathname.startsWith('/catalog/teams/')) {
+    const team = state.teams.find(item => item.id === url.pathname.split('/')[3]); Object.assign(team, body); return send(res, 200, { team });
+  }
+  if (url.pathname.startsWith('/catalog/projects/')) {
+    const project = state.projects.find(item => item.name === decodeURIComponent(url.pathname.split('/')[3])); Object.assign(project, body); return send(res, 200, { project });
+  }
+  if (url.pathname === '/coverage') {
+    if (req.method === 'GET') {
+      let rows = state.coverage; if (user.projects !== null) rows = rows.filter(row => user.projects.includes(row.project));
+      const health = Object.fromEntries(['healthy', 'stale', 'failing', 'missing', 'disabled'].map(name => [name, rows.filter(row => row.health === name).length]));
+      return send(res, 200, { count: rows.length, required_attention: rows.filter(row => row.required && row.enabled && row.health !== 'healthy').length, health, results: rows, generated_at: '2026-01-02T00:00:00Z' });
+    }
+    const expectation = { id: `${String(state.coverage.length + 1).padStart(8, '0')}-6666-4666-8666-666666666666`, ...body, team: null, enabled: true, health: 'missing', last_status: null, last_successful_at: null, last_clean_at: null, last_findings: null, next_due_at: null };
+    state.coverage.push(expectation); return send(res, 201, { expectation });
+  }
+  if (url.pathname.startsWith('/coverage/')) {
+    const expectation = state.coverage.find(item => item.id === url.pathname.split('/')[2]); Object.assign(expectation, body); expectation.health = expectation.enabled ? 'healthy' : 'disabled'; return send(res, 200, { expectation });
+  }
+  if (url.pathname === '/audit-events') {
+    let rows = state.auditEvents;
+    for (const key of ['actor', 'action', 'object_type']) if (url.searchParams.get(key)) rows = rows.filter(row => row[key].includes(url.searchParams.get(key)));
+    const offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 50);
+    return send(res, 200, { count: rows.length, page_count: rows.slice(offset, offset + limit).length, offset, results: rows.slice(offset, offset + limit) });
+  }
+  if (url.pathname === '/my-queue') {
+    let rows = state.findings.filter(row => row.assignee === user.username && ['open', 'investigating', 'verification_pending'].includes(row.status));
+    if (user.projects !== null) rows = rows.filter(row => user.projects.includes(row.project));
+    const offset = Number(url.searchParams.get('offset') || 0), limit = Number(url.searchParams.get('limit') || 50);
+    return send(res, 200, { count: rows.length, overdue: 0, page_count: rows.slice(offset, offset + limit).length, offset, results: rows.slice(offset, offset + limit) });
+  }
   if (url.pathname === '/scanner-tokens') {
     if (req.method === 'GET') {
       if (state.failTokenList-- > 0) return send(res, 503, { detail: 'Token list temporarily unavailable' });
@@ -194,7 +245,11 @@ const server = createServer(async (req, res) => {
     if (!record) return send(res, 404, { detail: 'Finding not found' });
     if (req.method === 'PATCH') {
       if (state.failPatch-- > 0) return send(res, 503, { detail: 'Temporary save failure' });
-      Object.assign(record, body); return send(res, 200, { ok: true, finding: { status: record.status, assignee: record.assignee } });
+      Object.assign(record, body);
+      if (body.status === 'verification_pending') record.workflow = { disposition_reason: null, duplicate_of_id: null, verification_requested_at: '2026-01-02T00:00:00Z', verified_at: null, verified_by: null };
+      else if (body.status === 'false_positive' || body.status === 'duplicate') record.workflow = { disposition_reason: body.reason, duplicate_of_id: body.duplicate_of_id || null, verification_requested_at: null, verified_at: null, verified_by: null };
+      else if (body.status) record.workflow = { disposition_reason: null, duplicate_of_id: null, verification_requested_at: null, verified_at: null, verified_by: null };
+      return send(res, 200, { ok: true, finding: { status: record.status, assignee: record.assignee, workflow: record.workflow } });
     }
     if (req.method === 'POST' && url.pathname.endsWith('/comments')) {
       const comment = { id: String(record.comments.length + 1), author: user.username, content: body.content, action_type: 'comment', created_at: '2026-01-02T00:00:00Z' };

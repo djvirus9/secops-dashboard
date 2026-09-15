@@ -41,7 +41,7 @@ def list_imports(request: Request, limit: int = 50, offset: int = 0, project: Op
 def list_notifications(
     request: Request,
     limit: int = 50, offset: int = 0, finding_id: Optional[str] = None,
-    status: Optional[Literal["pending", "processing", "sent", "failed", "needs_review"]] = None,
+    status: Optional[Literal["pending", "processing", "sent", "failed", "needs_review", "cancelled"]] = None,
 ):
     require_admin(request)
     limit, offset = max(1, min(limit, 200)), max(0, offset)

@@ -33,6 +33,12 @@ export function safeReturnRoute(value: unknown): UrlObject {
     case "/github-sync": return { pathname: "/github-sync", query, hash };
     case "/ai-security": return { pathname: "/ai-security", query, hash };
     case "/remediation": return { pathname: "/remediation", query, hash };
+    case "/my-queue": return { pathname: "/my-queue", query, hash };
+    case "/operations": return { pathname: "/operations", query, hash };
+    case "/jira-sync": return { pathname: "/jira-sync", query, hash };
+    case "/coverage": return { pathname: "/coverage", query, hash };
+    case "/catalog": return { pathname: "/catalog", query, hash };
+    case "/audit": return { pathname: "/audit", query, hash };
   }
   const detail = /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(pathname);
   return detail ? { pathname: "/findings/[id]", query: { ...query, id: detail[1] }, hash } : { pathname: "/" };

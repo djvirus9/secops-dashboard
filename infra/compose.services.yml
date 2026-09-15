@@ -39,6 +39,9 @@ x-backend-environment: &backend-environment
   NOTIFICATION_POLL_SECONDS: ${NOTIFICATION_POLL_SECONDS:-5}
   NOTIFICATION_MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS:-5}
   INTELLIGENCE_POLL_SECONDS: ${INTELLIGENCE_POLL_SECONDS:-5}
+  AUTOMATION_POLL_SECONDS: ${AUTOMATION_POLL_SECONDS:-5}
+  JIRA_SYNC_ENABLED: ${JIRA_SYNC_ENABLED:-false}
+  JIRA_SYNC_INTERVAL_MINUTES: ${JIRA_SYNC_INTERVAL_MINUTES:-30}
 
 x-notification-environment: &notification-environment
   <<: *database-environment
@@ -145,6 +148,29 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-m", "app.remediation.worker", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  automation-worker:
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *database-environment
+      AUTOMATION_POLL_SECONDS: ${AUTOMATION_POLL_SECONDS:-5}
+      JIRA_SYNC_ENABLED: ${JIRA_SYNC_ENABLED:-false}
+      JIRA_SYNC_INTERVAL_MINUTES: ${JIRA_SYNC_INTERVAL_MINUTES:-30}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      # Presence only: notifications are delivered by notification-worker.
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    command: ["sh", "-c", "python -m app.deployment --worker automation && exec python -m app.automation.worker"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.automation.worker", "--health"]
       interval: 30s
       timeout: 5s
       retries: 3

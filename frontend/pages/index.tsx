@@ -77,7 +77,7 @@ export default function Dashboard() {
           <h1 className="mt-1 text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">Security posture at a glance</h1>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Prioritize exploited risk, watch remediation deadlines, and measure whether the backlog is moving.</p>
         </div>
-        {summary && <p className="text-xs text-gray-500 dark:text-gray-400">{summary.assets} assets · {summary.resolved_findings} resolved · updated {new Date(summary.generated_at).toLocaleTimeString()}</p>}
+        {summary && <p className="text-xs text-gray-500 dark:text-gray-400">{summary.assets} assets · {summary.resolved_findings} completed · updated {new Date(summary.generated_at).toLocaleTimeString()}</p>}
       </div>
 
       <ErrorNotice message={summaryError} retry={loadSummary} />
@@ -254,9 +254,9 @@ function HorizontalBars({ values }: { values: [string, number, string][] }) {
 function TrendChart({ rows }: { rows: { date: string; new: number; resolved: number }[] }) {
   const max = Math.max(1, ...rows.flatMap(row => [row.new, row.resolved]));
   return <div>
-    <div className="mb-4 flex gap-4 text-xs text-gray-600 dark:text-gray-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-indigo-500" />New</span><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Resolved</span></div>
-    <div className="flex h-40 items-end gap-1" aria-label="Fourteen-day new and resolved findings chart">
-      {rows.map((row, index) => <div key={row.date} className="flex h-full min-w-0 flex-1 flex-col justify-end" title={`${row.date}: ${row.new} new, ${row.resolved} resolved`}>
+    <div className="mb-4 flex gap-4 text-xs text-gray-600 dark:text-gray-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-indigo-500" />New</span><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Completed</span></div>
+    <div className="flex h-40 items-end gap-1" aria-label="Fourteen-day new and completed findings chart">
+      {rows.map((row, index) => <div key={row.date} className="flex h-full min-w-0 flex-1 flex-col justify-end" title={`${row.date}: ${row.new} new, ${row.resolved} completed`}>
         <div className="flex h-[8rem] items-end justify-center gap-px"><span className="w-2 rounded-t bg-indigo-500" style={{ height: `${row.new / max * 100}%` }} /><span className="w-2 rounded-t bg-emerald-500" style={{ height: `${row.resolved / max * 100}%` }} /></div>
         {(index === 0 || index === rows.length - 1) && <span className="mt-2 truncate text-[.6rem] text-gray-500">{new Date(`${row.date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
       </div>)}
