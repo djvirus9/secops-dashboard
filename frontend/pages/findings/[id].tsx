@@ -54,12 +54,13 @@ type Finding = {
   resolved_at: string | null;
   sla_status: "complete" | "accepted" | "untracked" | "overdue" | "due_soon" | "on_track";
   risk_acceptance: { status: "active" | "expired" | "none"; accepted_at: string | null; expires_at: string | null; accepted_by: string | null; reason: string | null };
+  workflow: { disposition_reason: string | null; duplicate_of_id: string | null; verification_requested_at: string | null; verified_at: string | null; verified_by: string | null };
   signal_id: string;
   comments: Comment[];
   notifications?: { id: string; channel: string; status: string; last_error?: string | null }[];
 };
 
-const STATUS_OPTIONS = ["open", "investigating", "resolved", "closed"];
+const STATUS_OPTIONS = ["open", "investigating", "verification_pending", "resolved", "closed", "false_positive", "duplicate"];
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-600 text-white",
@@ -72,8 +73,11 @@ const SEVERITY_COLORS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   open: "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200",
   investigating: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200",
+  verification_pending: "bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200",
   resolved: "bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-200",
   closed: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
+  false_positive: "bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-200",
+  duplicate: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
 };
 
 function safeReference(value: string): string | null {
@@ -99,6 +103,8 @@ export default function FindingDetailPage() {
 
   const [newStatus, setNewStatus] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
+  const [dispositionReason, setDispositionReason] = useState("");
+  const [duplicateOfId, setDuplicateOfId] = useState("");
   const [newComment, setNewComment] = useState("");
   const [acceptanceReason, setAcceptanceReason] = useState("");
   const [acceptanceExpiry, setAcceptanceExpiry] = useState("");
@@ -143,14 +149,19 @@ export default function FindingDetailPage() {
     setActionError("");
     setSuccess("");
     try {
-      const updates: { status?: string; assignee?: string } = {};
-      if (newStatus !== finding.status) updates.status = newStatus;
+      const updates: { status?: string; assignee?: string; reason?: string; duplicate_of_id?: string } = {};
+      if (newStatus !== finding.status) {
+        updates.status = newStatus;
+        if (["false_positive", "duplicate"].includes(newStatus)) updates.reason = dispositionReason.trim();
+        if (newStatus === "duplicate") updates.duplicate_of_id = duplicateOfId.trim();
+      }
       if (newAssignee !== (finding.assignee || "")) updates.assignee = newAssignee;
       if (Object.keys(updates).length > 0) {
-        const result = await apiPatch<{ finding: { status: string; assignee: string | null } }>(`/findings/${finding.id}`, updates);
+        const result = await apiPatch<{ finding: Partial<Finding> & { status: string; assignee: string | null } }>(`/findings/${finding.id}`, updates);
         setFinding({ ...finding, ...result.finding });
         setNewStatus(result.finding.status);
         setNewAssignee(result.finding.assignee || "");
+        setDispositionReason(""); setDuplicateOfId("");
         setSuccess("Finding updated.");
         await refreshActivity(finding.id);
       }
@@ -237,7 +248,7 @@ export default function FindingDetailPage() {
               {finding.severity.toUpperCase()}
             </span>
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[finding.status] || ""}`}>
-              {finding.status}
+              {finding.status.replaceAll("_", " ")}
             </span>
           </div>
         </div>
@@ -314,6 +325,7 @@ export default function FindingDetailPage() {
         </div>}
 
         {(finding.component || finding.component_version) && <p className="break-words text-sm"><strong>Component:</strong> {finding.component || "Unknown"}{finding.component_version && ` @ ${finding.component_version}`}</p>}
+        {(finding.workflow.disposition_reason || finding.workflow.verification_requested_at || finding.workflow.verified_at) && <div className="grid gap-3 border-t pt-4 text-sm dark:border-gray-700 md:grid-cols-2"><div><h2 className="font-semibold">Remediation workflow</h2>{finding.workflow.verification_requested_at && <p className="mt-1">Verification requested {new Date(finding.workflow.verification_requested_at).toLocaleString()}</p>}{finding.workflow.verified_at && <p className="mt-1">Verified {new Date(finding.workflow.verified_at).toLocaleString()} by {finding.workflow.verified_by}</p>}{finding.workflow.disposition_reason && <p className="mt-1 whitespace-pre-wrap">{finding.workflow.disposition_reason}</p>}</div>{finding.workflow.duplicate_of_id && <div><div className="text-xs uppercase text-gray-500">Canonical finding</div><Link className="break-all text-indigo-600 underline dark:text-indigo-400" href={`/findings/${finding.workflow.duplicate_of_id}`}>{finding.workflow.duplicate_of_id}</Link></div>}</div>}
         {finding.description && (
           <div className="border-t pt-4 dark:border-gray-700">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Description</h2>
@@ -369,7 +381,7 @@ export default function FindingDetailPage() {
               className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{s}</option>
+                <option key={s} value={s}>{s.replaceAll("_", " ")}</option>
               ))}
             </select>
           </div>
@@ -388,9 +400,11 @@ export default function FindingDetailPage() {
           </div>
         </div>
 
+        {["false_positive", "duplicate"].includes(newStatus) && <div className="grid gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30 md:grid-cols-2"><label className="grid gap-1 text-sm">Decision reason<textarea className="input min-h-24" minLength={20} maxLength={2000} required value={dispositionReason} onChange={event => setDispositionReason(event.target.value)} placeholder="Explain the validation evidence and why this disposition is correct (minimum 20 characters)." /></label>{newStatus === "duplicate" && <label className="grid content-start gap-1 text-sm">Canonical finding ID<input className="input" required pattern="[0-9a-fA-F-]{36}" value={duplicateOfId} onChange={event => setDuplicateOfId(event.target.value)} placeholder="UUID of the original finding" /></label>}</div>}
+
         <button
           onClick={handleUpdateFinding}
-          disabled={saving || (newStatus === finding.status && newAssignee === (finding.assignee || ""))}
+          disabled={saving || (newStatus === finding.status && newAssignee === (finding.assignee || "")) || (["false_positive", "duplicate"].includes(newStatus) && dispositionReason.trim().length < 20) || (newStatus === "duplicate" && !duplicateOfId.trim())}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? "Saving..." : "Update Finding"}

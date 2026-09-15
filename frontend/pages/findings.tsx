@@ -57,7 +57,7 @@ export default function FindingsPage() {
       <label className="grid gap-1 text-sm">Status
         <select aria-label="Status" className="input" value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
           <option value="">All statuses</option>
-          {["open", "investigating", "resolved", "closed"].map((value) => <option key={value}>{value}</option>)}
+          {["open", "investigating", "verification_pending", "resolved", "closed", "false_positive", "duplicate"].map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
         </select>
       </label>
       <label className="grid gap-1 text-sm">Sort

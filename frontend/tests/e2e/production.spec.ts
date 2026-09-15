@@ -155,9 +155,52 @@ test('remediation intelligence is transparent and risk acceptance remains explic
   expect(state.findings[0].risk_acceptance.status).toBe('none');
 });
 
+test('operational coverage, ownership, queue and audit pages expose actionable context', async ({ page }) => {
+  await page.goto('/coverage');
+  await expect(page.getByRole('heading', { name: 'Security coverage' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'healthy', exact: true })).toBeVisible();
+  await page.getByLabel('Project', { exact: true }).fill('identity');
+  await page.getByLabel('Parser name', { exact: true }).fill('semgrep');
+  await page.getByRole('button', { name: 'Add expectation' }).click();
+  await expect(page.getByText('Coverage expectation created.', { exact: true })).toBeVisible();
+  await expect(page.getByText('identity', { exact: true })).toBeVisible();
+
+  await page.goto('/catalog');
+  await expect(page.getByRole('heading', { name: 'Project and team catalog' })).toBeVisible();
+  await expect(page.getByText('Platform Security', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'unmanaged-service' })).toBeVisible();
+  await page.getByLabel('Project key').fill('owner/service');
+  await page.getByLabel('Display name').fill('Slash project');
+  await page.getByRole('button', { name: 'Create project profile' }).click();
+  const projectRow = page.getByRole('row').filter({ hasText: 'owner/service' });
+  await expect(projectRow).toBeVisible();
+  await projectRow.getByRole('button', { name: 'Deactivate' }).click();
+  await expect(projectRow.getByText('inactive', { exact: true })).toBeVisible();
+
+  await page.goto('/my-queue');
+  await expect(page.getByRole('heading', { name: 'My queue' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Finding 1', exact: true })).toBeVisible();
+
+  await page.goto('/audit');
+  await expect(page.getByRole('heading', { name: 'Audit log' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'finding.update', exact: true })).toBeVisible();
+});
+
+test('structured false-positive decisions require evidence and remain visible', async ({ page }) => {
+  await page.goto(`/findings/${findingId}`);
+  await page.getByLabel('Status', { exact: true }).selectOption('false_positive');
+  const update = page.getByRole('button', { name: 'Update Finding' });
+  await expect(update).toBeDisabled();
+  const reason = 'Validated synthetic finding with reproducible supporting evidence.';
+  await page.getByLabel('Decision reason').fill(reason);
+  await update.click();
+  await expect(page.getByText(reason, { exact: true })).toBeVisible();
+  await expect(page.locator('span').filter({ hasText: /^false positive$/ })).toBeVisible();
+});
+
 test('mobile navigation and forms fit the viewport and retain accessible names', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const path of ['/', '/integrations', '/risks', '/scanner-tokens', '/github-sync', '/remediation', '/ai-security', `/findings/${findingId}`]) {
+  for (const path of ['/', '/my-queue', '/coverage', '/catalog', '/audit', '/integrations', '/risks', '/scanner-tokens', '/github-sync', '/remediation', '/ai-security', `/findings/${findingId}`]) {
     await page.goto(path);
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
     const widths = await page.evaluate(() => ({
@@ -368,6 +411,13 @@ test('viewer controls are read-only and analysts never fetch integration configu
   await page.goto('/assets');
   await expect(page.getByRole('button', { name: 'Add Asset' })).toHaveCount(0);
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Users', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Catalog', exact: true })).toBeVisible();
+  await page.goto('/catalog');
+  await expect(page.getByText('Platform Security', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Create|Deactivate|Activate/ })).toHaveCount(0);
+  await page.goto('/coverage');
+  await expect(page.locator('span').filter({ hasText: /^healthy$/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add expectation' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await login('analyst');
   await page.goto('/integrations');

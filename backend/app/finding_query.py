@@ -8,9 +8,16 @@ from sqlalchemy import or_
 from .models import Finding
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
-FindingStatus = Literal["open", "investigating", "resolved", "closed"]
+FindingStatus = Literal[
+    "open", "investigating", "verification_pending", "resolved", "closed",
+    "false_positive", "duplicate",
+]
 FindingSort = Literal["priority_desc", "risk_desc", "last_seen_desc"]
 SlaFilter = Literal["overdue", "due_soon", "accepted", "on_track"]
+
+ACTIVE_FINDING_STATUSES = ("open", "investigating", "verification_pending")
+TERMINAL_FINDING_STATUSES = ("resolved", "closed", "false_positive", "duplicate")
+REOPEN_ON_OBSERVATION_STATUSES = ("resolved", "closed", "verification_pending")
 
 
 class FindingFilters(BaseModel):
@@ -59,7 +66,7 @@ def finding_filters(query: FindingFilters) -> list:
         filters.append(Finding.kev.is_(query.kev))
     if query.sla is not None:
         now = datetime.now(UTC).replace(tzinfo=None)
-        active = Finding.status.in_(["open", "investigating"])
+        active = Finding.status.in_(ACTIVE_FINDING_STATUSES)
         accepted = Finding.risk_accepted_until > now
         if query.sla == "accepted":
             filters.extend([active, accepted])

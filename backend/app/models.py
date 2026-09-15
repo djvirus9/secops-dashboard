@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, String, Integer, Float, Date, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, String, Integer, Float, Date, DateTime, Index, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -36,6 +36,50 @@ class Asset(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     findings: Mapped[list["Finding"]] = relationship(back_populates="asset_rel")
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    contact: Mapped[str] = mapped_column(String(255), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ProjectProfile(Base):
+    """Optional ownership metadata layered over existing project string keys."""
+
+    __tablename__ = "projects"
+
+    name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    team_id: Mapped[str | None] = mapped_column(String, ForeignKey("teams.id"), nullable=True, index=True)
+    business_unit: Mapped[str] = mapped_column(String(255), default="")
+    tier: Mapped[str] = mapped_column(String(20), default="medium")
+    repository_url: Mapped[str] = mapped_column(String(500), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class CoverageExpectation(Base):
+    __tablename__ = "coverage_expectations"
+    __table_args__ = (
+        UniqueConstraint("project", "source_type", "source", name="uq_coverage_expectation_source"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    project: Mapped[str] = mapped_column(String(255), index=True)
+    source_type: Mapped[str] = mapped_column(String(20))
+    source: Mapped[str] = mapped_column(String(200))
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class Signal(Base):
@@ -104,6 +148,12 @@ class Finding(Base):
     risk_accepted_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     risk_acceptance_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    disposition_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duplicate_of_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    verification_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     signal_id: Mapped[str] = mapped_column(String, index=True)
 
     comments: Mapped[list["Comment"]] = relationship(back_populates="finding", order_by="Comment.created_at.desc()")
@@ -125,6 +175,10 @@ class Comment(Base):
 
 class ImportRun(Base):
     __tablename__ = "imports"
+    __table_args__ = (
+        Index("ix_imports_coverage_latest", "project", "parser", "created_at"),
+        Index("ix_imports_coverage_success", "project", "parser", "status", "completed_at"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     parser: Mapped[str] = mapped_column(String, default="auto")

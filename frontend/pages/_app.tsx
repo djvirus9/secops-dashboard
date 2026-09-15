@@ -7,7 +7,9 @@ import "../styles/globals.css";
 
 const nav = [
   { href: "/", label: "Dashboard" },
+  { href: "/my-queue", label: "My queue" },
   { href: "/findings", label: "Findings" },
+  { href: "/coverage", label: "Coverage" },
   { href: "/assets", label: "Assets" },
   { href: "/risks", label: "Risks" },
   { href: "/remediation", label: "Remediation" },
@@ -18,9 +20,11 @@ const nav = [
   { href: "/users", label: "Users" },
   { href: "/scanner-tokens", label: "Scanner tokens" },
   { href: "/github-sync", label: "GitHub sync" },
+  { href: "/catalog", label: "Catalog" },
+  { href: "/audit", label: "Audit" },
   { href: "/profile", label: "Account" },
 ];
-const adminPages = ["/users", "/notifications", "/scanner-tokens", "/github-sync"];
+const adminPages = ["/users", "/notifications", "/scanner-tokens", "/github-sync", "/audit"];
 
 export default function App(props: AppProps) { return <AuthProvider><AppShell {...props} /></AuthProvider>; }
 

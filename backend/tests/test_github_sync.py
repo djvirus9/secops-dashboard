@@ -170,6 +170,34 @@ def test_source_transitions_close_reopen_and_missing_alerts_do_not_close(client,
         assert count(db, Finding) == count(db, GitHubAlert) == count(db, Comment) == 2
 
 
+def test_github_verification_requires_an_explicit_fixed_state(client, auth_headers, remote):
+    connection = create(client, auth_headers)
+    service.process_one()
+    with SessionLocal() as db:
+        finding_id = db.scalar(select(Finding.id).where(Finding.tool == "github-code-scanning"))
+
+    assert client.patch(f"/findings/{finding_id}", headers=auth_headers,
+                        json={"status": "verification_pending"}).status_code == 200
+    queue(client, auth_headers, connection)
+    service.process_one()
+    with SessionLocal() as db:
+        finding = db.get(Finding, finding_id)
+        assert finding.status == "open" and finding.verification_requested_at is None
+        comment = db.scalar(select(Comment).where(Comment.finding_id == finding_id)
+                            .order_by(Comment.created_at.desc()))
+        assert comment.action_type == "verification_failed"
+
+    assert client.patch(f"/findings/{finding_id}", headers=auth_headers,
+                        json={"status": "verification_pending"}).status_code == 200
+    remote[0] = replace(remote[0], state="fixed")
+    queue(client, auth_headers, connection)
+    service.process_one()
+    with SessionLocal() as db:
+        finding = db.get(Finding, finding_id)
+        assert finding.status == "resolved"
+        assert finding.verified_at is not None and finding.verified_by == "GitHub sync"
+
+
 def test_failure_is_atomic_and_rate_limit_delays_retry(client, auth_headers, remote, monkeypatch):
     connection = create(client, auth_headers)
     service.process_one()

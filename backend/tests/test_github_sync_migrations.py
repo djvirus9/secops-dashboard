@@ -62,4 +62,4 @@ def test_github_identity_is_unique_and_populated_downgrade_refuses_before_ddl(mi
         downgrade(migration_engine, "0005")
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"

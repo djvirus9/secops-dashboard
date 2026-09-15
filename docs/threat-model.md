@@ -1,4 +1,4 @@
-# Threat model: version 0.4
+# Threat model: version 0.5
 
 This model describes the repository's self-hosted architecture and its automated
 checks. It does not attest to a particular running server, cloud account, or
@@ -11,13 +11,14 @@ organization tenancy, and high availability are outside this release.
 Protected assets include findings and scanner evidence, project membership,
 password hashes and sessions, saved views, audit history, API/integration secrets,
 remediation policies, deadlines, risk acceptances, cached vulnerability intelligence,
+project/team ownership, coverage expectations and evidence, finding dispositions,
 database backups, and service availability. Treat imported scanner text as
 untrusted even when the scanner has a valid ingestion key.
 
 | Actor | Authority |
 | --- | --- |
 | Unauthenticated visitor or hostile website | Can reach public health/login endpoints and try to induce browser requests |
-| Viewer | Reads granted projects, exports their findings, and manages private saved views |
+| Viewer | Reads granted projects, their ownership/coverage, exports findings, and manages private saved views |
 | Analyst | Viewer capabilities plus writes/imports/triage within granted projects |
 | Administrator | All projects, accounts, integrations, and notification administration |
 | Administrative automation | Full API authority across projects using `API_KEY`; fixed `api-admin` audit identity |
@@ -73,6 +74,8 @@ of application audit history and infrastructure logs.
 | 1. Exfiltrate the GitHub token through a configured destination or malicious pagination/redirect | Low–medium / high / upstream failures visible, host compromise may not be | Fixed api.github.com endpoint construction, validated owner/repo identifiers, no arbitrary hosts, disabled redirect following, bounded pagination and sanitized failures; mocked hostile URL/redirect responses, local token permissions and environment-isolation tests |
 | 1. Poison priority or disclose internal data through a public intelligence refresh | Low–medium / high / stale and failed state is visible; plausible poisoned values may not be | Fixed CISA/FIRST hosts, no arbitrary URL, no proxy environment, redirect/size/schema/range validation, CVE-only EPSS requests, last-good retention, and transparent score reasons; test hostile documents, redirects, missing records, failures, and recalculation |
 | 1. Hide overdue work through unauthorized or indefinite risk acceptance | Medium / high / audit and finding history aid review | Administrator user session only, project-scoped lookup, required reason, maximum 365-day expiry, automatic expiry, no priority reduction, and durable audit/history entries; test API-key/role rejection, expiry bounds, revoke, and SLA restoration |
+| 1. Misclassify a real issue as a false positive or another project's duplicate | Medium / high / finding activity and audit aid review | Analyst write access within project grants, minimum evidence reason, same-project canonical target, individual rather than bulk disposition, and structured retained fields; test short reasons, self/cross-project targets, scoped reads, and later observations |
+| 1. Treat missing or clean scanner output as proof of remediation | Medium / high / stale coverage and run history are visible | Coverage derives health only from durable explicit runs; clean reports remain evidence but never close findings, missing GitHub results never imply a fix, and repeated observations fail pending verification; test healthy/stale/failing/missing states and reopen behavior |
 | 2. Duplicate alerts, overwrite another project's identity, or infer a false resolution after a partial sync | Medium / high / run history and source-state evidence aid review | Immutable repository/project/source mappings, stable source alert identity, transactional claims and cancellation, unchanged-replay deduplication, no resolution inferred from absence; test replay, source changes, interruption, pagination failure and competing workers |
 | 2. Deploy an untested or replaced image through a moving tag | Medium / high / attestations and digest inspection support detection | Exact tested-main gate, native smoke on both staged architectures, publish-once version tags, SBOM/provenance and deployed digest references; unit-test failed/missing CI, stale HEAD and tag replacement; operators verify package visibility/provenance and retain verified backups |
 | 2. Exhaust resources with login attempts, giant reports, repeated exports, or many saved views | Medium / medium–high / request failures and resource use are observable | Global/account login throttles, request/parser/import limits, import deadline, 100 saved views per user, 200 bulk IDs, 10,000-row/16-MiB CSV caps; test boundaries and rejected transactions; operator owns upstream rate limits and capacity monitoring |
@@ -99,6 +102,11 @@ of application audit history and infrastructure logs.
 - Administrators can create policy changes and risk acceptances across the trusted
   deployment. Audit records are not tamper-proof against a database/host operator,
   and the application does not provide an independent approval chain.
+- Coverage health establishes that a configured source reported on schedule; it
+  does not establish asset completeness, correct scanner configuration, or control
+  effectiveness. Administrators choose exact source mappings and intervals. Alert
+  on stale/failing required coverage outside the application if independent paging
+  is required.
 - A stolen live user session can act until it expires or is revoked. HttpOnly
   limits token reads by JavaScript; it does not make same-origin script compromise
   harmless. MFA and federated identity are not present.

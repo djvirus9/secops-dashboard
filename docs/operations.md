@@ -91,6 +91,13 @@ and an explicit list grants only exact project names. Include the empty string
 Saved filters cannot expand those grants. The last active administrator cannot
 be disabled or demoted.
 
+All signed-in users can read Catalog and Coverage data within the same project
+grants. Administrators manage team/project profiles and coverage expectations;
+the Audit page remains administrator-only. My Queue additionally requires a user
+session and matches the assignee to that exact dashboard username, so automation
+keys cannot impersonate a personal worklist. See
+[operational ownership and coverage](operations-coverage.md).
+
 Sessions expire after 43,200 seconds absolute or 1,800 seconds idle by default.
 `SESSION_TTL_SECONDS` accepts 300–604,800 and `SESSION_IDLE_TIMEOUT_SECONDS` accepts
 60–86,400; idle must not exceed the absolute lifetime. Password changes/recovery,
@@ -235,8 +242,10 @@ alongside the backup inventory. Preserve credentials separately in your secret
 manager. Retention and scheduled backups are operator responsibilities; the app
 does not automatically purge historical records.
 
-Backups contain password hashes, project grants, session records,
-saved views, audit history and, from 0.3, scanner-token hashes and GitHub sync state. Protect them as authentication data. A restored
+Backups contain password hashes, project grants, session records, saved views,
+audit history, scanner-token hashes, GitHub sync state, ownership/coverage
+configuration, and structured remediation decisions. Protect them as authentication
+and security-operations data. A restored
 database can reinstate sessions that were valid when the backup was taken;
 revoke affected accounts' sessions through password recovery and rotate/revoke
 affected scanner tokens before resuming
@@ -349,6 +358,11 @@ Revision 0007 adds remediation policies, cached KEV/EPSS evidence, worker state,
 priority explanations, SLA deadlines, resolution timestamps, and expiring risk
 acceptance. Existing finding identity and triage are preserved; only new priority
 and deadline fields are backfilled. See [remediation intelligence](remediation-intelligence.md).
+Revision 0008 adds project/team profiles, coverage expectations, and structured
+disposition/verification fields. It preserves finding identities and existing
+project strings. A downgrade is refused after the new inventory or workflow has
+been used because removing it would discard operator decisions and evidence. See
+[operational ownership and coverage](operations-coverage.md).
 For the local helper, stop services and copy the complete `.local` directory to
 protected backup storage before updating source; start applies migrations to the
 same `.local/secops.db`. Do not delete `.local` or replace its initial credentials

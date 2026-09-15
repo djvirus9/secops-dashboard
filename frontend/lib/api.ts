@@ -33,12 +33,31 @@ const STATIC_API_PATHS = new Map<string, string>([
   ["/remediation/policies", "/api/remediation/policies"],
   ["/scanner-tokens", "/api/scanner-tokens"],
   ["/github-sync", "/api/github-sync"],
+  ["/catalog", "/api/catalog"],
+  ["/catalog/teams", "/api/catalog/teams"],
+  ["/catalog/projects", "/api/catalog/projects"],
+  ["/coverage", "/api/coverage"],
+  ["/audit-events", "/api/audit-events"],
+  ["/my-queue", "/api/my-queue"],
   ...["/auth/login", "/auth/logout", "/auth/me", "/auth/password", "/users", "/saved-views", "/findings/bulk", "/findings/export.csv"].map((path): [string, string] => [path, `/api${path}`]),
 ]);
 const FINDING_PATH =
   /^\/findings\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(\/(?:comments|risk-acceptance))?$/i;
 
 function toApiUrl(path: string): string {
+  const operationalPath = /^\/(coverage|catalog\/teams)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(path);
+  if (operationalPath) return `/api/${operationalPath[1]}/${encodeURIComponent(operationalPath[2])}`;
+  if (path.startsWith("/catalog/projects/")) {
+    const encodedName = path.slice("/catalog/projects/".length);
+    if (!encodedName || encodedName.includes("/")) throw new Error("Unsupported API path");
+    try {
+      const name = decodeURIComponent(encodedName);
+      if (!name || name.length > 255 || name.includes("\0")) throw new Error("Unsupported API path");
+      return `/api/catalog/projects/${encodeURIComponent(name)}`;
+    } catch {
+      throw new Error("Unsupported API path");
+    }
+  }
   const managedPath = /^\/(scanner-tokens|github-sync)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/(revoke|rotate|sync|runs))?$/i.exec(path);
   if (managedPath) {
     const [, resource, id, action] = managedPath;

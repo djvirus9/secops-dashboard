@@ -105,6 +105,7 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
             select(GitHubAlert).where(GitHubAlert.connection_id == connection.id))}
         changes = []
         observed_ids = []
+        unchanged_open_ids = []
         for alert in alerts:
             data = asdict(alert)
             digest = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -114,6 +115,8 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
                 observed_ids.append(link.finding_id)
             if link is None or link.content_hash != digest:
                 changes.append((alert, data, digest, link))
+            elif alert.state == "open":
+                unchanged_open_ids.append(link.finding_id)
         if changes:
             asset = _get_or_create_asset(db, key=connection.repository, name=connection.repository,
                                          environment="unknown", owner="", criticality="medium", exposure="internal",
@@ -162,22 +165,90 @@ def apply_snapshot(task: dict, alerts: list) -> bool:
                     finding = db.scalar(select(Finding).where(Finding.id == link.finding_id).with_for_update())
                     for name, value in values.items():
                         setattr(finding, name, value)
+                    if link.source_state == alert.state == "open" and finding.status == "verification_pending":
+                        finding.status = "open"
+                        finding.disposition_reason = None
+                        finding.duplicate_of_id = None
+                        finding.verification_requested_at = None
+                        finding.verified_at = None
+                        finding.verified_by = None
+                        finding.resolved_at = None
+                        reopened = True
+                        db.add(Comment(
+                            finding_id=finding.id,
+                            author="GitHub sync",
+                            action_type="verification_failed",
+                            content="Verification failed: GitHub still reports this alert as open",
+                        ))
                     # A repeated open observation must not undo an analyst's
                     # status. Only an actual source state transition changes it.
                     if link.source_state != alert.state:
                         old_status = finding.status
                         finding.status = STATE_TO_STATUS[alert.state]
                         finding.resolved_at = now if finding.status in {"resolved", "closed"} else None
-                        reopened = finding.status == "open" and old_status in {"closed", "resolved"}
-                        db.add(Comment(finding_id=finding.id, author="GitHub sync", action_type="status_change",
-                                       content=f"GitHub alert changed from {link.source_state} to {alert.state}; "
-                                               f"status changed from {old_status} to {finding.status}"))
+                        if finding.status == "resolved" and old_status == "verification_pending":
+                            finding.verified_at = now
+                            finding.verified_by = "GitHub sync"
+                            finding.disposition_reason = None
+                            finding.duplicate_of_id = None
+                        elif finding.status in {"resolved", "closed"}:
+                            finding.disposition_reason = None
+                            finding.duplicate_of_id = None
+                            finding.verification_requested_at = None
+                            finding.verified_at = None
+                            finding.verified_by = None
+                        reopened = finding.status == "open" and old_status in {
+                            "closed", "resolved", "verification_pending", "false_positive", "duplicate",
+                        }
+                        if reopened:
+                            finding.disposition_reason = None
+                            finding.duplicate_of_id = None
+                            finding.verification_requested_at = None
+                            finding.verified_at = None
+                            finding.verified_by = None
+                        verification_failed = finding.status == "open" and old_status == "verification_pending"
+                        db.add(Comment(
+                            finding_id=finding.id,
+                            author="GitHub sync",
+                            action_type="verification_failed" if verification_failed else "status_change",
+                            content=(
+                                f"Verification failed: GitHub alert changed from {link.source_state} "
+                                f"to {alert.state} and is open again"
+                                if verification_failed else
+                                f"GitHub alert changed from {link.source_state} to {alert.state}; "
+                                f"status changed from {old_status} to {finding.status}"
+                            ),
+                        ))
                     link.source_state, link.content_hash = alert.state, digest
                 refresh_finding(db, finding, now=now)
                 if finding.status == "open" and (is_new or reopened):
                     enqueue_finding(db, finding, event_id=signal.id, is_new=is_new)
             import_run.new_findings = run.new_findings = new_count
             import_run.deduplicated = run.updated = len(changes) - new_count
+        verification_reopened = 0
+        if unchanged_open_ids:
+            pending = db.scalars(select(Finding).where(
+                Finding.id.in_(unchanged_open_ids),
+                Finding.status == "verification_pending",
+            ).order_by(Finding.id).with_for_update()).all()
+            for finding in pending:
+                finding.status = "open"
+                finding.disposition_reason = None
+                finding.duplicate_of_id = None
+                finding.verification_requested_at = None
+                finding.verified_at = None
+                finding.verified_by = None
+                finding.resolved_at = None
+                db.add(Comment(
+                    finding_id=finding.id,
+                    author="GitHub sync",
+                    action_type="verification_failed",
+                    content="Verification failed: GitHub still reports this alert as open",
+                    created_at=now,
+                ))
+                enqueue_finding(db, finding, event_id=run.id, is_new=False)
+                verification_reopened += 1
+        run.updated += verification_reopened
         # Last seen means observed, including an unchanged replay. Update it
         # without altering triage, occurrence counts or creating more signals.
         # Do this after asset locking above to retain the app's lock order.

@@ -22,8 +22,8 @@ from app.adopt_legacy_db import (
 )
 from app.db import Base
 from app.models import (
-    Asset, AuditEvent, AuthThrottle, Comment, Finding, ImportRun,
-    NotificationDelivery, SavedView, Signal, User, UserSession,
+    Asset, AuditEvent, AuthThrottle, Comment, CoverageExpectation, Finding, ImportRun,
+    NotificationDelivery, ProjectProfile, SavedView, Signal, Team, User, UserSession,
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -357,6 +357,59 @@ def test_identity_downgrade_refuses_persisted_data_before_schema_changes(migrati
 
     assert set(sa.inspect(migration_engine).get_table_names()) == before
     with migration_engine.connect() as connection:
-        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0007"
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
         assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+
+
+@pytest.mark.parametrize("record", ["team", "project", "coverage"])
+def test_operations_downgrade_refuses_catalog_or_coverage_data_before_schema_changes(
+    migration_engine, record,
+):
+    upgrade(migration_engine)
+    rows = {
+        "team": Team(name="Keep team"),
+        "project": ProjectProfile(name="keep-project"),
+        "coverage": CoverageExpectation(
+            project="keep-project", source_type="scanner", source="semgrep",
+        ),
+    }
+    row = rows[record]
+    with Session(migration_engine) as session:
+        session.add(row)
+        session.commit()
+    before = set(sa.inspect(migration_engine).get_table_names())
+
+    with pytest.raises(RuntimeError, match="Cannot downgrade while .* contains data"):
+        downgrade(migration_engine, "0007")
+
+    assert set(sa.inspect(migration_engine).get_table_names()) == before
+    with migration_engine.connect() as connection:
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert connection.execute(sa.select(sa.func.count()).select_from(row.__table__)).scalar_one() == 1
+        assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+
+
+def test_operations_downgrade_refuses_structured_finding_state(migration_engine):
+    upgrade(migration_engine)
+    with Session(migration_engine) as session:
+        session.add(Finding(
+            fingerprint="f" * 64,
+            tool="synthetic",
+            title="Preserve disposition",
+            severity="high",
+            asset="example.invalid",
+            signal_id="synthetic-signal",
+            status="false_positive",
+            disposition_reason="Validated evidence must survive this downgrade attempt.",
+        ))
+        session.commit()
+    before = set(sa.inspect(migration_engine).get_table_names())
+
+    with pytest.raises(RuntimeError, match="structured remediation workflow"):
+        downgrade(migration_engine, "0007")
+
+    assert set(sa.inspect(migration_engine).get_table_names()) == before
+    with migration_engine.connect() as connection:
+        assert connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert connection.execute(sa.text("SELECT status FROM findings")).scalar_one() == "false_positive"
