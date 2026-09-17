@@ -21,12 +21,27 @@ export async function verifyRemediationOwnership(page: Page) {
   await page.getByRole('button', { name: 'Add member', exact: true }).click();
   await expect(page.getByText('Team member added. Project grants are unchanged.')).toBeVisible();
   await page.getByLabel('Routing project').selectOption(project);
+  await expect(page.getByRole('button', { name: 'Save routing', exact: true })).toBeEnabled();
   await page.getByLabel('Default assignee').selectOption('reviewer');
   await expect(page.getByLabel('Default assignee').locator('option[value="scoped-viewer"]')).toHaveCount(0);
   await expect(page.getByLabel('Default assignee').locator('option[value="scoped-analyst"]')).toHaveCount(0);
   await page.getByLabel('Enable ownership routing for this project').check();
+  const routingSave = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/ownership/rules' && url.searchParams.get('project') === project
+      && response.request().method() === 'PUT';
+  });
   await page.getByRole('button', { name: 'Save routing', exact: true }).click();
+  const saved = await routingSave;
+  expect(saved.status()).toBe(200);
+  expect(saved.request().postDataJSON()).toEqual({ enabled: true, default_assignee: 'reviewer' });
+  expect(await saved.json()).toMatchObject({ project, team_id: team.id, enabled: true, default_assignee: 'reviewer', ready: true });
   await expect(page.getByText('Ownership routing saved. Existing manual assignments are preserved.')).toBeVisible();
+  const persisted = await page.request.get('/api/ownership/rules', { params: { project } });
+  expect(persisted.status()).toBe(200);
+  expect((await persisted.json()).results).toEqual([
+    expect.objectContaining({ project, team_id: team.id, enabled: true, default_assignee: 'reviewer', ready: true }),
+  ]);
   const imported = await page.request.post('/api/import/scan', { headers: { Origin: origin }, data: { parser: 'generic-json', project, content: JSON.stringify([{ title: 'Routed browser finding', source_id: 'routing-regression', asset: 'workflow.example.invalid', severity: 'high' }]) } });
   expect(imported.status()).toBe(200);
   const finding = (await (await page.request.get(`/api/findings?project=${project}`)).json()).results[0];
