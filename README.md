@@ -6,13 +6,25 @@ Next.js provides the dashboard. Dedicated workers deliver durable Slack/Jira
 notifications, optionally synchronize GitHub Cloud security alerts, and refresh
 public CISA KEV and FIRST EPSS vulnerability intelligence.
 
+[Explore the interactive sample walkthrough (synthetic data)](https://djvirus9.github.io/case-studies/secops-dashboard/#secops-demo)
+or [run the full application locally](#try-it-locally). The walkthrough is a
+simplified, browser-only triage demonstration, not a hosted dashboard instance.
+
 The source is public on GitHub under the [MIT License](LICENSE). Run your own
 instance to use the dashboard; this repository does not provide a shared hosted
 service. Local credentials, scan data, and database files stay in your checkout
 and are excluded from Git.
 
-See the [0.6.0 development notes](CHANGELOG.md) for team-based assignment,
-operational alerts, Jira progress synchronization, and upgrade notes.
+This README follows `main`. For published versions and pinned image digests, see
+the [latest GitHub release](https://github.com/djvirus9/secops-dashboard/releases/latest);
+use the README and deployment files from the matching tag when running a release.
+See the [changelog](CHANGELOG.md) for team-based assignment, operational alerts,
+Jira progress synchronization, and upgrade notes.
+
+Inspect the engineering evidence: [fixture-backed parser support](docs/parser-support.md),
+[project access boundaries and residual risks](docs/threat-model.md),
+[tests and CI checks](#tests-and-checks), and
+[release-image and backup/restore verification](docs/releasing.md).
 
 ![SecOps Dashboard running locally with synthetic demo findings](docs/images/dashboard.png)
 
